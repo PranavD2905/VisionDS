@@ -1,4 +1,5 @@
 import { inferPointerRoles, type ExecutionTrace } from '@visionds/trace-schema';
+import type { Explanation } from '@visionds/explainer';
 import { create } from 'zustand';
 
 interface VisState {
@@ -10,8 +11,11 @@ interface VisState {
   cursor: number;
   playing: boolean;
   speed: number;
+  /** AI narration for the active trace; null until requested. */
+  explanation: Explanation | null;
 
   setTraces: (traces: ExecutionTrace[], active: number) => void;
+  setExplanation: (explanation: Explanation | null) => void;
   setActive: (index: number) => void;
   seek: (index: number) => void;
   stepBy: (delta: number) => void;
@@ -30,6 +34,7 @@ export const useVis = create<VisState>((set) => ({
   cursor: 0,
   playing: false,
   speed: 1,
+  explanation: null,
 
   setTraces: (traces, active) =>
     set({
@@ -37,8 +42,11 @@ export const useVis = create<VisState>((set) => ({
       active,
       cursor: 0,
       playing: false,
+      explanation: null,
     }),
-  setActive: (index) => set({ active: index, cursor: 0, playing: false }),
+  setExplanation: (explanation) => set({ explanation }),
+  setActive: (index) =>
+    set({ active: index, cursor: 0, playing: false, explanation: null }),
   seek: (index) => set((s) => ({ cursor: clampCursor(s, index), playing: false })),
   stepBy: (delta) =>
     set((s) => {

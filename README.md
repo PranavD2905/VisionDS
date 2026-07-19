@@ -39,3 +39,14 @@ infinite loop ends as a clean "trace truncated" verdict, never a frozen tab.
 
 Student code runs entirely in the visitor's own browser sandbox; nothing is
 sent to a server.
+
+## AI explanations (optional)
+
+On the run page, **✨ Explain this run** sends the code and a compact trace
+digest to Gemini and renders a failure summary plus subtitle-style captions
+that follow the scrubber. It needs a Gemini API key (free at
+aistudio.google.com) which is stored only in your browser's localStorage and
+sent only to Google — never bundled or logged. The trace stays ground truth:
+AI text only decorates it, and annotations pointing at nonexistent steps are
+dropped. `packages/explainer` defines the provider-agnostic `Explainer`
+interface, so other models can plug in beside `GeminiExplainer`.

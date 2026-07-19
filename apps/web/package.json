@@ -12,6 +12,7 @@
   "dependencies": {
     "@codemirror/lang-python": "^6.2.1",
     "@uiw/react-codemirror": "^4.25.11",
+    "@visionds/explainer": "workspace:*",
     "@visionds/runners": "workspace:*",
     "@visionds/trace-schema": "workspace:*",
     "framer-motion": "^12.42.2",
