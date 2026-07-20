@@ -1,7 +1,7 @@
 import { python } from '@codemirror/lang-python';
 import CodeMirror from '@uiw/react-codemirror';
 import { twoSumFailTrace, type ExecutionTrace, type TestCase } from '@visionds/trace-schema';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { runner } from '../runner';
 import { useVis } from '../store';
@@ -29,6 +29,19 @@ export function PastePage() {
 
   const updateCase = (i: number, patch: Partial<TestCase>) =>
     setCases((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+
+  // ⌘/Ctrl + Enter runs — keyboard-fast, the way the brand wants it
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy) {
+        e.preventDefault();
+        void onRun();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, code, cases]);
 
   const show = (traces: ExecutionTrace[]) => {
     const failing = traces.findIndex((t) => t.result.verdict !== 'pass');
@@ -130,6 +143,12 @@ export function PastePage() {
         <button className="run-btn" onClick={onRun} disabled={busy}>
           {busy ? status ?? 'Running…' : 'Run & visualize'}
         </button>
+        {!busy && (
+          <span className="run-hint">
+            <kbd>⌘</kbd>
+            <kbd>↵</kbd>
+          </span>
+        )}
         <button className="demo-btn" onClick={() => show([twoSumFailTrace])} disabled={busy}>
           Load demo trace
         </button>

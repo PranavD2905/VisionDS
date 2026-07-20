@@ -11,6 +11,7 @@ import json
 import sys
 import time
 import types
+from collections import deque
 from contextlib import redirect_stdout
 
 STUDENT_FILE = "<student>"
@@ -84,6 +85,9 @@ def _find_entry(tree):
 def _kind_of(v):
     if isinstance(v, str):
         return "string"
+    if isinstance(v, deque):
+        # the canonical Python queue/stack — rendered as an ordered sequence
+        return "array"
     if isinstance(v, (list, tuple)):
         if v and all(isinstance(x, (list, tuple)) for x in v):
             return "matrix"
@@ -121,9 +125,10 @@ def _convert(v, depth, state):
         return v
     if depth >= MAX_DEPTH:
         return _short_repr(v, state)
-    if isinstance(v, (list, tuple)):
-        out = [_convert(x, depth + 1, state) for x in list(v)[:MAX_COLLECTION_ITEMS]]
-        if len(v) > MAX_COLLECTION_ITEMS:
+    if isinstance(v, (list, tuple, deque)):
+        seq = list(v)
+        out = [_convert(x, depth + 1, state) for x in seq[:MAX_COLLECTION_ITEMS]]
+        if len(seq) > MAX_COLLECTION_ITEMS:
             state["truncated"] = True
             out.append("…")
         return out

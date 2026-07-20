@@ -13,7 +13,7 @@ interface Candidate {
 
 /**
  * Language-agnostic post-processing: an integer local whose value stays
- * within [-1, len] of some array-kind local across every step where both
+ * within [-1, len] of some array-, matrix-, or string-kind local across every step where both
  * exist is tagged with role {kind:'index', target}, so the UI can render it
  * as a pointer chip riding on that array. Returns a new trace; the input is
  * not mutated.
@@ -25,7 +25,9 @@ export function inferPointerRoles(trace: ExecutionTrace): ExecutionTrace {
 
   for (const step of trace.steps) {
     for (const v of step.locals) {
-      if (v.kind === 'array' || v.kind === 'matrix') arrayNames.add(v.name);
+      if (v.kind === 'array' || v.kind === 'matrix' || v.kind === 'string') {
+        arrayNames.add(v.name);
+      }
       if (v.kind === 'scalar' && typeof v.value === 'number' && Number.isInteger(v.value)) {
         intNames.add(v.name);
         let set = intValues.get(v.name);
@@ -49,11 +51,17 @@ export function inferPointerRoles(trace: ExecutionTrace): ExecutionTrace {
       const me = step.locals.find((v) => v.name === name);
       if (!me || typeof me.value !== 'number') continue;
       for (const arr of step.locals) {
-        if (!arrayNames.has(arr.name) || !Array.isArray(arr.value)) continue;
+        if (!arrayNames.has(arr.name)) continue;
+        const len = Array.isArray(arr.value)
+          ? arr.value.length
+          : typeof arr.value === 'string'
+            ? arr.value.length
+            : undefined;
+        if (len === undefined) continue;
         let c = candidates.get(arr.name);
         if (!c) candidates.set(arr.name, (c = { cooccurrences: 0, inBoundsEverywhere: true }));
         c.cooccurrences += 1;
-        if (me.value < -1 || me.value > arr.value.length) c.inBoundsEverywhere = false;
+        if (me.value < -1 || me.value > len) c.inBoundsEverywhere = false;
       }
     }
 
