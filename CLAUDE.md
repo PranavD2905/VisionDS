@@ -62,21 +62,37 @@ pnpm workspaces monorepo:
   reply — same contract, different transport. `AbortSignal` supported.
 - `packages/trace-service` — Node/TS server (run with `tsx`) that traces
   compiled languages under a debugger, emitting the identical
-  `ExecutionTrace`. Pluggable `LanguageAdapter` seam. C++ adapter
-  (`adapters/cpp`): generates one translation unit (prelude + student code at
-  known line numbers + a `main` that builds testcase args as typed C++ and
-  JSON-serializes the result via a sentinel line), compiles `clang++ -g`, and
-  the lldb stepper (`stepper/lldb_stepper.py` — the `sys.settrace` analog)
-  single-steps only the student's lines, reading locals as structured,
-  kind-tagged values (`vector`→array, `unordered_map`→dict) with the shared
-  caps; hides pre-declaration garbage; climbs out of STL/runtime frames.
-  `POST /trace`. Same entry-point rule and LeetCode input parsing as Python.
-  Runs student code → sandbox before any non-local deployment.
+  `ExecutionTrace`. `POST /trace`. Pluggable `LanguageAdapter` seam: each
+  adapter compiles a harness + returns a `StepperCommand` the generalized
+  runner spawns (`trace.ts`). Shared caps (`caps.ts`), entry-point rule, and
+  LeetCode input parsing. **C++** (`adapters/cpp`): one translation unit
+  (prelude + student code at known lines + a `main` building typed args and
+  JSON-serializing the result via a sentinel), compiled `clang++ -g`, stepped
+  by `stepper/lldb_stepper.py` (the `sys.settrace` analog) which reads locals
+  as structured kind-tagged values (`vector`→array, `unordered_map`→dict,
+  stack/queue via the underlying container, ListNode/TreeNode→linkedlist/tree),
+  hides pre-declaration garbage, climbs out of STL frames. **Java**
+  (`adapters/java`): writes Solution.java (imports + student) + Main.java (arg
+  building + result serialization + ListNode/TreeNode defs), compiles `javac
+  -g`, stepped by `stepper/VisionDsTracer.java` — a JDI debugger program (the
+  Java analog) that class-exclusion-filters to the student's code and reads
+  primitives/String/arrays/List/HashMap/HashSet/ListNode/TreeNode. Needs a JDK
+  (auto-detected, or `VISIONDS_JAVA_HOME`). Runs student code → sandbox before
+  any non-local deployment.
 - `packages/explainer` — optional AI layer. Provider-agnostic `Explainer`
   interface; `GeminiExplainer` (default `gemini-2.5-flash`) sends code + a
   compact trace digest, gets `{summary, annotations[{stepIndex, text}]}`;
   sanitization drops out-of-range stepIndexes. API key: user-supplied,
   localStorage only. A Claude explainer can plug in beside it.
+- `apps/extension` — Manifest V3 Chrome extension (plain HTML/JS, **no build
+  step**, load-unpacked). On a LeetCode problem page its popup runs an extractor
+  in the page's MAIN world (`chrome.scripting.executeScript`) to read the Monaco
+  editor code, the selected language (`global_lang` → python/cpp/java), the
+  problem title/slug, and example testcases parsed from the statement's
+  `Input:/Output:` blocks into VisionDS's one-arg-per-line format. Everything is
+  shown editable in the popup (so LeetCode DOM drift never blocks a handoff),
+  then encoded as UTF-8-safe base64url into the site URL fragment
+  (`/#import=…`) and opened in a new tab. The fragment never leaves the browser.
 - `apps/web` — React + Vite + TS. `PastePage` (CodeMirror 6, per-language
   starter code + a language selector; Python/C++ live, Java "soon") →
   `RunPage`: CodePanel (current-line highlight),
@@ -91,16 +107,16 @@ pnpm workspaces monorepo:
 ```sh
 pnpm install
 pnpm dev        # web app on http://localhost:5173
-pnpm --filter @visionds/trace-service dev   # C++ trace service on :8787 (needs clang++ + lldb)
-pnpm test       # vitest: schema + explainer + Pyodide tracer + C++ trace-service
+pnpm --filter @visionds/trace-service dev   # C++/Java trace service on :8787 (needs clang++/lldb; JDK for Java)
+pnpm test       # vitest: schema + explainer + Pyodide tracer + C++/Java trace-service
 pnpm typecheck  # tsc --noEmit across all packages
 pnpm build      # production build
 ```
 
 The web app finds the service at `VITE_TRACE_SERVICE` (default
-`http://localhost:8787`); C++ runs need it up, Python does not.
+`http://localhost:8787`); C++/Java runs need it up, Python does not.
 
-## Status (2026-07-21)
+## Status (2026-07-22)
 
 - Done & verified: monorepo, trace-schema + caps + pointer inference,
   PyodideRunner + harness + watchdog, web visualizer (build-from-nothing
@@ -108,9 +124,12 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
 - Done & verified: server-side C++ via `trace-service` (lldb stepper) end to
   end — language selector → compile+trace → same animated stage. Unit tests,
   HTTP service, and a live browser run all pass; typecheck + prod build clean.
-- Java: architecture ready (adapter seam + `ServerRunner`; "java" listed as
-  "soon"), but blocked on no JDK installed on this machine. Next: a
-  jdb/JDI-based Java stepper, verified once a JDK is present.
+- Done & verified: server-side Java via `trace-service` (JDI tracer) end to
+  end — language selector → javac + JDI step → same animated stage. 4 Java unit
+  tests (two-sum int[]+HashMap, List return, void in-place, compile error) and
+  a live browser run pass. Java coverage: primitives/String/arrays(+2D)/List/
+  HashMap/HashSet/ListNode/TreeNode; value- and void-returning entries. JDK
+  auto-detected from Homebrew or `VISIONDS_JAVA_HOME`.
 - C++ coverage: value- and void-returning entries; vector/string/map/set/
   scalar, std::stack/queue (via the underlying container), and ListNode/
   TreeNode (built from LeetCode input, traversed by the stepper into
@@ -118,8 +137,14 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   Signature-driven arg typing (vector<char>, long long, …). Remaining gaps:
   graph/adjacency structures, exotic parameter types.
 - Known minor: main JS chunk ~940 kB (code-split when convenient).
-- Not built yet: browser extension (LeetCode capture → handoff), Java runner,
-  production sandbox for the trace service, Claude explainer option.
+- Done: browser extension (`apps/extension`) — LeetCode capture → base64url
+  hash handoff → `PastePage` hydrates via `apps/web/src/lib/import.ts` and shows
+  an "Imported from LeetCode" badge. Encode/decode roundtrip (incl. unicode) and
+  example-testcase parsing verified in Node; web typecheck + prod build clean.
+  Not yet exercised against live LeetCode DOM in a real browser (extractor is
+  best-effort with editable-in-popup fallback); no toolbar icon PNGs bundled.
+- Not built yet: production sandbox for the trace service, Claude explainer
+  option, graph/adjacency visualization.
 
 ## Repo conventions
 

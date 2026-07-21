@@ -54,11 +54,17 @@ public:
     id: 'java',
     label: 'Java',
     runsIn: 'server',
-    enabled: false,
+    enabled: true,
     starterCode: `class Solution {
     public int[] twoSum(int[] nums, int target) {
-        // coming soon
-        return new int[]{0, 0};
+        Map<Integer, Integer> seen = new HashMap<>();
+        for (int i = 0; i < nums.length; i++) {
+            int need = target - nums[i];
+            if (seen.containsKey(need))
+                return new int[]{seen.get(need), seen.get(need)};  // bug: should be {seen.get(need), i}
+            seen.put(nums[i], i);
+        }
+        return new int[]{};
     }
 }
 `,

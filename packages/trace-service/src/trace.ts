@@ -1,12 +1,7 @@
-import { execSync, spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import {
   ExecutionTraceSchema,
-  MAX_COLLECTION_ITEMS,
-  MAX_DEPTH,
   MAX_STEPS,
-  MAX_STRING_LEN,
   WALL_CLOCK_MS,
   type ExecutionTrace,
   type JsonValue,
@@ -14,33 +9,16 @@ import {
   type TraceStep,
 } from '@visionds/trace-schema';
 import { cppAdapter } from './adapters/cpp';
-import { type LanguageAdapter, TraceUserError } from './adapters/types';
+import { javaAdapter } from './adapters/java';
+import { type LanguageAdapter, type PreparedProgram, TraceUserError } from './adapters/types';
 import { parseValue } from './parseInput';
 import { valuesEqual } from './verdict';
 
 const ADAPTERS: Record<string, LanguageAdapter> = {
   cpp: cppAdapter,
   'c++': cppAdapter,
+  java: javaAdapter,
 };
-
-const CAPS_JSON = JSON.stringify({
-  MAX_STEPS,
-  MAX_COLLECTION_ITEMS,
-  MAX_STRING_LEN,
-  MAX_DEPTH,
-  WALL_CLOCK_MS,
-});
-
-const STEPPER = join(dirname(fileURLToPath(import.meta.url)), 'stepper', 'lldb_stepper.py');
-const PYTHON = process.env.VISIONDS_PYTHON ?? '/usr/bin/python3';
-
-let lldbPythonPath: string | null = null;
-function getLldbPythonPath(): string {
-  if (lldbPythonPath === null) {
-    lldbPythonPath = execSync('lldb -P', { encoding: 'utf8' }).trim();
-  }
-  return lldbPythonPath;
-}
 
 interface StepperOutput {
   steps: TraceStep[];
@@ -51,7 +29,7 @@ interface StepperOutput {
 }
 
 export function supportedLanguages(): string[] {
-  return ['cpp'];
+  return ['cpp', 'java'];
 }
 
 /**
@@ -74,32 +52,30 @@ export function traceCase(language: string, code: string, testCase: TestCase): E
   }
 
   try {
-    const out = runStepper(prepared.binary, prepared);
+    const out = runStepper(prepared);
     return assembleTrace(language, code, testCase, out);
   } finally {
     prepared.cleanup();
   }
 }
 
-function runStepper(
-  binary: string,
-  p: { entry: string; studentStart: number; studentEnd: number },
-): StepperOutput {
-  const res = spawnSync(
-    PYTHON,
-    [STEPPER, binary, String(p.studentStart), String(p.studentEnd), p.entry, CAPS_JSON],
-    {
-      encoding: 'utf8',
-      timeout: WALL_CLOCK_MS + 10_000, // watchdog above the in-stepper wall clock
-      maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, PYTHONPATH: getLldbPythonPath() },
-    },
-  );
+function runStepper(p: PreparedProgram): StepperOutput {
+  const res = spawnSync(p.stepper.command, p.stepper.args, {
+    encoding: 'utf8',
+    timeout: WALL_CLOCK_MS + 15_000, // watchdog above the in-stepper wall clock
+    maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, ...p.stepper.env },
+  });
   if (res.error) throw new Error(`stepper failed to run: ${res.error.message}`);
   const stdout = (res.stdout ?? '').trim();
   if (!stdout) throw new Error(`stepper produced no output. stderr: ${res.stderr ?? ''}`);
-  const parsed = JSON.parse(stdout) as StepperOutput;
+  // The stepper prints one JSON object; ignore any leading debugger chatter.
+  const jsonStart = stdout.indexOf('{');
+  if (jsonStart === -1) throw new Error(`stepper output was not JSON: ${stdout.slice(0, 300)}`);
+  const parsed = JSON.parse(stdout.slice(jsonStart)) as StepperOutput;
   if (parsed.error) throw new Error(`stepper error: ${parsed.error}`);
+  // The Java tracer emits index:0 for every step; normalize to array position.
+  parsed.steps.forEach((s, i) => (s.index = i));
   return parsed;
 }
 

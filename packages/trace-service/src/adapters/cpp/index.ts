@@ -1,12 +1,22 @@
-import { spawnSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { TestCase } from '@visionds/trace-schema';
+import { CAPS_JSON } from '../../caps';
 import { type LanguageAdapter, type PreparedProgram, TraceUserError } from '../types';
 import { generateCppProgram } from './harness';
 
 const COMPILER = process.env.VISIONDS_CXX ?? 'clang++';
+const PYTHON = process.env.VISIONDS_PYTHON ?? '/usr/bin/python3';
+const STEPPER = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'stepper', 'lldb_stepper.py');
+
+let lldbPythonPath: string | null = null;
+function getLldbPythonPath(): string {
+  if (lldbPythonPath === null) lldbPythonPath = execSync('lldb -P', { encoding: 'utf8' }).trim();
+  return lldbPythonPath;
+}
 
 /**
  * C++ adapter: generates one translation unit (prelude + student code + a
@@ -35,10 +45,18 @@ export const cppAdapter: LanguageAdapter = {
     }
 
     return {
-      binary: binPath,
-      entry: prog.entry,
-      studentStart: prog.studentStart,
-      studentEnd: prog.studentEnd,
+      stepper: {
+        command: PYTHON,
+        args: [
+          STEPPER,
+          binPath,
+          String(prog.studentStart),
+          String(prog.studentEnd),
+          prog.entry,
+          CAPS_JSON,
+        ],
+        env: { PYTHONPATH: getLldbPythonPath() },
+      },
       cleanup: () => rmSync(dir, { recursive: true, force: true }),
     };
   },
