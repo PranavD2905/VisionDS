@@ -1,34 +1,35 @@
+import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
 import CodeMirror from '@uiw/react-codemirror';
 import { twoSumFailTrace, type ExecutionTrace, type TestCase } from '@visionds/trace-schema';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { runner } from '../runner';
+import { DEFAULT_LANGUAGE, LANGUAGES, langById } from '../languages';
+import { runnerFor } from '../runner';
 import { useVis } from '../store';
-
-const STARTER_CODE = `def twoSum(nums, target):
-    for i in range(len(nums)):
-        for j in range(i + 1, len(nums)):
-            if nums[i] + nums[j] == target:
-                return [i, i]  # bug: should be [i, j]
-`;
-
-const STARTER_CASES: TestCase[] = [
-  { input: '[2,7,11,15]\n9', expected: '[0,1]' },
-  { input: '[3,2,4]\n6', expected: '[1,2]' },
-];
 
 export function PastePage() {
   const navigate = useNavigate();
   const setTraces = useVis((s) => s.setTraces);
-  const [code, setCode] = useState(STARTER_CODE);
-  const [cases, setCases] = useState<TestCase[]>(STARTER_CASES);
+  const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
+  const [code, setCode] = useState(() => langById(DEFAULT_LANGUAGE).starterCode);
+  const [cases, setCases] = useState<TestCase[]>(() => langById(DEFAULT_LANGUAGE).starterCases);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const updateCase = (i: number, patch: Partial<TestCase>) =>
     setCases((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+
+  // Switching language loads that language's starter code + cases.
+  const switchLanguage = (id: string) => {
+    const def = langById(id);
+    if (!def.enabled || id === language) return;
+    setLanguage(id);
+    setCode(def.starterCode);
+    setCases(def.starterCases);
+    setError(null);
+  };
 
   // ⌘/Ctrl + Enter runs — keyboard-fast, the way the brand wants it
   useEffect(() => {
@@ -41,7 +42,7 @@ export function PastePage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, code, cases]);
+  }, [busy, code, cases, language]);
 
   const show = (traces: ExecutionTrace[]) => {
     const failing = traces.findIndex((t) => t.result.verdict !== 'pass');
@@ -53,6 +54,7 @@ export function PastePage() {
     setBusy(true);
     setError(null);
     try {
+      const runner = runnerFor(language);
       const traces: ExecutionTrace[] = [];
       for (let i = 0; i < cases.length; i++) {
         setStatus(`Testcase ${i + 1} of ${cases.length}…`);
@@ -61,7 +63,9 @@ export function PastePage() {
             onStatus: (s) =>
               setStatus(
                 s === 'loading'
-                  ? 'Loading Python runtime (first run only)…'
+                  ? runner.capabilities.runsIn === 'server'
+                    ? 'Compiling & tracing on the server…'
+                    : 'Loading Python runtime (first run only)…'
                   : `Running testcase ${i + 1} of ${cases.length}…`,
               ),
           }),
@@ -76,6 +80,8 @@ export function PastePage() {
     }
   };
 
+  const editorLang = language === 'cpp' ? cpp() : python();
+
   return (
     <div className="paste-page">
       <header className="page-header">
@@ -88,15 +94,37 @@ export function PastePage() {
       </header>
 
       <section className="editor-section">
-        <h2>Your Python solution</h2>
+        <div className="editor-head">
+          <h2>Your solution</h2>
+          <div className="lang-tabs" role="tablist" aria-label="Language">
+            {LANGUAGES.map((l) => (
+              <button
+                key={l.id}
+                role="tab"
+                aria-selected={l.id === language}
+                className={`lang-tab${l.id === language ? ' active' : ''}${l.enabled ? '' : ' soon'}`}
+                onClick={() => switchLanguage(l.id)}
+                disabled={!l.enabled}
+                title={l.enabled ? `${l.label} — runs ${l.runsIn === 'server' ? 'on the trace service' : 'in your browser'}` : `${l.label} — coming soon`}
+              >
+                {l.label}
+                {!l.enabled && <span className="soon-tag">soon</span>}
+              </button>
+            ))}
+          </div>
+        </div>
         <p className="hint">
-          A top-level function or a LeetCode-style <code>class Solution</code>.
+          {language === 'python' ? (
+            <>A top-level function or a LeetCode-style <code>class Solution</code>.</>
+          ) : (
+            <>A <code>class Solution</code> with a public method (LeetCode style). Compiled &amp; traced on the local trace service.</>
+          )}
         </p>
         <CodeMirror
           value={code}
           height="320px"
           theme="dark"
-          extensions={[python()]}
+          extensions={[editorLang]}
           onChange={setCode}
         />
       </section>
@@ -149,9 +177,11 @@ export function PastePage() {
             <kbd>↵</kbd>
           </span>
         )}
-        <button className="demo-btn" onClick={() => show([twoSumFailTrace])} disabled={busy}>
-          Load demo trace
-        </button>
+        {language === 'python' && (
+          <button className="demo-btn" onClick={() => show([twoSumFailTrace])} disabled={busy}>
+            Load demo trace
+          </button>
+        )}
         {error && <div className="error-note">{error}</div>}
       </section>
     </div>

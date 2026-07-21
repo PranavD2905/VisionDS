@@ -10,6 +10,7 @@
     "test": "echo 'no tests in web (covered by packages)'"
   },
   "dependencies": {
+    "@codemirror/lang-cpp": "^6.0.2",
     "@codemirror/lang-python": "^6.2.1",
     "@uiw/react-codemirror": "^4.25.11",
     "@visionds/explainer": "workspace:*",

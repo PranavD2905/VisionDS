@@ -216,6 +216,53 @@ button:disabled { opacity: 0.45; cursor: default; }
 .editor-section { margin-bottom: var(--s-6); }
 .cases-section { margin-bottom: var(--s-5); }
 
+.editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-1);
+  flex-wrap: wrap;
+}
+/* language picker — a quiet segmented control; the active tab wears Livewire */
+.lang-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.lang-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 4px 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.lang-tab:hover:not(:disabled):not(.active) { color: var(--text); border-color: transparent; }
+.lang-tab.active {
+  background: var(--panel-2);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.lang-tab.soon { cursor: default; }
+.lang-tab:disabled { opacity: 0.6; }
+.soon-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-xs);
+  padding: 0 4px;
+}
+
 .editor-section .cm-editor {
   border-radius: var(--r-lg);
   border: 1px solid var(--border);

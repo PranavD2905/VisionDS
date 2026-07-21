@@ -21,16 +21,22 @@ service) is obsolete — this monorepo is the only implementation.
 2. **`ExecutionTrace` is the locked contract.** Everything downstream of a
    runner (UI, explainer, future extension) speaks the Zod schema in
    `packages/trace-schema/src/schema.ts`. Extend it additively only.
-3. **Language-agnostic by design.** Python-only today, but the `Runner`
-   interface (`packages/runners/src/types.ts`) is the seam: adding C++/Java
-   later means one new server-side runner, zero changes to schema or UI.
+3. **Language-agnostic by design.** The `Runner` interface
+   (`packages/runners/src/types.ts`) is the seam. Python runs in-browser
+   (`PyodideRunner`); compiled languages run on the server-side trace service
+   (`ServerRunner` → `packages/trace-service`). Adding a language = one new
+   runner/adapter, zero changes to schema or UI.
 4. **Fluid, modern animation is a product requirement.** Framer Motion
    springs (interruptible, scrub-safe), shared `layoutId` gliding for pointer
    chips, diff-driven choreography between steps, transform/opacity only,
    `prefers-reduced-motion` respected. "Basic" motion is a regression.
-5. **Student code never leaves the browser.** Execution is client-side
-   (Pyodide/WASM). The only network call is the optional Gemini explain
-   request, using the student's own API key from localStorage.
+5. **Client-side by default; server only when a language needs it.** Python
+   executes entirely in the browser (Pyodide/WASM) — nothing leaves the
+   machine. Compiled languages (C++ today, Java next) have no in-browser
+   tracer, so they route to the local trace service, which compiles and steps
+   them under a debugger. That service runs student code and MUST be sandboxed
+   in production (container, no network, cpu/mem/pid limits, ephemeral fs).
+   The optional Gemini explain call still uses the student's own key.
 
 ## Architecture
 
@@ -43,23 +49,37 @@ pnpm workspaces monorepo:
   tracer so all runners share them); `analyze.ts` `inferPointerRoles()` tags
   integer locals that stay in-bounds of an array as pointer chips;
   `fixtures/twoSumFail.ts` canned trace for UI work without a runner.
-- `packages/runners` — `Runner` interface + `PyodideRunner`. A Web Worker
-  boots Pyodide (assets served locally from `/pyodide/` via
-  vite-plugin-static-copy, not CDN) and runs student code under
-  `harness.py`'s `sys.settrace` tracer: LeetCode-style input parsing (one
-  arg per line, `name = literal` accepted; entry point = last top-level def,
-  else last public method of `class Solution`), capped locals snapshots,
+- `packages/runners` — `Runner` interface + two implementations.
+  `PyodideRunner`: a Web Worker boots Pyodide (assets served locally from
+  `/pyodide/` via vite-plugin-static-copy, not CDN) and runs student code
+  under `harness.py`'s `sys.settrace` tracer: LeetCode-style input parsing
+  (one arg per line, `name = literal` accepted; entry point = last top-level
+  def, else last public method of `class Solution`), capped locals snapshots,
   stdout capture, verdict + divergence detection. A JS-side watchdog
   (cap + 10s) terminates the worker for loops Python can't interrupt →
-  clean `timeout` verdict, never a frozen tab. One run in flight at a time;
-  `AbortSignal` supported.
+  clean `timeout` verdict, never a frozen tab. `ServerRunner`: POSTs
+  `{language, code, testCase}` to the trace service and schema-validates the
+  reply — same contract, different transport. `AbortSignal` supported.
+- `packages/trace-service` — Node/TS server (run with `tsx`) that traces
+  compiled languages under a debugger, emitting the identical
+  `ExecutionTrace`. Pluggable `LanguageAdapter` seam. C++ adapter
+  (`adapters/cpp`): generates one translation unit (prelude + student code at
+  known line numbers + a `main` that builds testcase args as typed C++ and
+  JSON-serializes the result via a sentinel line), compiles `clang++ -g`, and
+  the lldb stepper (`stepper/lldb_stepper.py` — the `sys.settrace` analog)
+  single-steps only the student's lines, reading locals as structured,
+  kind-tagged values (`vector`→array, `unordered_map`→dict) with the shared
+  caps; hides pre-declaration garbage; climbs out of STL/runtime frames.
+  `POST /trace`. Same entry-point rule and LeetCode input parsing as Python.
+  Runs student code → sandbox before any non-local deployment.
 - `packages/explainer` — optional AI layer. Provider-agnostic `Explainer`
   interface; `GeminiExplainer` (default `gemini-2.5-flash`) sends code + a
   compact trace digest, gets `{summary, annotations[{stepIndex, text}]}`;
   sanitization drops out-of-range stepIndexes. API key: user-supplied,
   localStorage only. A Claude explainer can plug in beside it.
-- `apps/web` — React + Vite + TS. `PastePage` (CodeMirror 6, testcase rows,
-  pre-filled buggy two-sum) → `RunPage`: CodePanel (current-line highlight),
+- `apps/web` — React + Vite + TS. `PastePage` (CodeMirror 6, per-language
+  starter code + a language selector; Python/C++ live, Java "soon") →
+  `RunPage`: CodePanel (current-line highlight),
   Stage + `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips),
   Transport (play/pause/speed/step/scrub — scrubbing renders `steps[cursor]`,
   no re-execution), VerdictBanner ("Jump to failing step" seeks to
@@ -71,21 +91,31 @@ pnpm workspaces monorepo:
 ```sh
 pnpm install
 pnpm dev        # web app on http://localhost:5173
-pnpm test       # vitest: schema + explainer + Node-side Pyodide tracer suite
+pnpm --filter @visionds/trace-service dev   # C++ trace service on :8787 (needs clang++ + lldb)
+pnpm test       # vitest: schema + explainer + Pyodide tracer + C++ trace-service
 pnpm typecheck  # tsc --noEmit across all packages
 pnpm build      # production build
 ```
 
-## Status (2026-07-19)
+The web app finds the service at `VITE_TRACE_SERVICE` (default
+`http://localhost:8787`); C++ runs need it up, Python does not.
+
+## Status (2026-07-21)
 
 - Done & verified: monorepo, trace-schema + caps + pointer inference,
-  PyodideRunner + harness + watchdog, web visualizer, Gemini explainer.
-  All tests pass; typecheck + prod build clean.
-- Not yet reviewed: animation quality against the "fluid, not basic" bar —
-  needs a live run + screenshots.
-- Known minor: main JS chunk ~920 kB (code-split when convenient).
-- Not built yet: browser extension (LeetCode capture → handoff), server-side
-  runner for C++/Java, Claude explainer option.
+  PyodideRunner + harness + watchdog, web visualizer (build-from-nothing
+  diagrams for array/matrix/dict/set/stack/queue), Gemini explainer.
+- Done & verified: server-side C++ via `trace-service` (lldb stepper) end to
+  end — language selector → compile+trace → same animated stage. Unit tests,
+  HTTP service, and a live browser run all pass; typecheck + prod build clean.
+- Java: architecture ready (adapter seam + `ServerRunner`; "java" listed as
+  "soon"), but blocked on no JDK installed on this machine. Next: a
+  jdb/JDI-based Java stepper, verified once a JDK is present.
+- Known minor: main JS chunk ~930 kB (code-split when convenient). C++
+  coverage is a DSA subset (value-returning entry; vector/string/map/set/
+  scalar); void-return in-place problems and ListNode/TreeNode not yet mapped.
+- Not built yet: browser extension (LeetCode capture → handoff), Java runner,
+  production sandbox for the trace service, Claude explainer option.
 
 ## Repo conventions
 
