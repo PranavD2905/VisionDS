@@ -111,9 +111,13 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
 - Java: architecture ready (adapter seam + `ServerRunner`; "java" listed as
   "soon"), but blocked on no JDK installed on this machine. Next: a
   jdb/JDI-based Java stepper, verified once a JDK is present.
-- Known minor: main JS chunk ~930 kB (code-split when convenient). C++
-  coverage is a DSA subset (value-returning entry; vector/string/map/set/
-  scalar); void-return in-place problems and ListNode/TreeNode not yet mapped.
+- C++ coverage: value- and void-returning entries; vector/string/map/set/
+  scalar, std::stack/queue (via the underlying container), and ListNode/
+  TreeNode (built from LeetCode input, traversed by the stepper into
+  linkedlist/tree kinds, rendered as chained nodes / a laid-out binary tree).
+  Signature-driven arg typing (vector<char>, long long, …). Remaining gaps:
+  graph/adjacency structures, exotic parameter types.
+- Known minor: main JS chunk ~940 kB (code-split when convenient).
 - Not built yet: browser extension (LeetCode capture → handoff), Java runner,
   production sandbox for the trace service, Claude explainer option.
 

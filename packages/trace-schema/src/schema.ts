@@ -25,6 +25,9 @@ export const VarKindSchema = z.enum([
   'scalar',
   'string',
   'matrix',
+  // pointer-linked structures (server-side runners; e.g. C++ ListNode/TreeNode)
+  'linkedlist',
+  'tree',
 ]);
 export type VarKind = z.infer<typeof VarKindSchema>;
 

@@ -101,6 +101,64 @@ public:
     expect(Array.isArray(st?.value)).toBe(true);
   }, 30_000);
 
+  it('builds and traces a linked list (reverseList)', () => {
+    const code = `class Solution {
+public:
+    ListNode* reverseList(ListNode* head) {
+        ListNode* prev = nullptr;
+        while (head) {
+            ListNode* next = head->next;
+            head->next = prev;
+            prev = head;
+            head = next;
+        }
+        return prev;
+    }
+};`;
+    const trace = traceCase('cpp', code, { input: '[1,2,3,4,5]', expected: '[5,4,3,2,1]' });
+    expect(trace.result.verdict).toBe('pass');
+    const locals = trace.steps.flatMap((s) => s.locals);
+    const head = locals.find((l) => l.name === 'head' && l.kind === 'linkedlist');
+    expect(head).toBeDefined();
+    expect((head!.value as { vals: number[] }).vals).toEqual([1, 2, 3, 4, 5]);
+  }, 30_000);
+
+  it('builds and traces a binary tree (invertTree)', () => {
+    const code = `class Solution {
+public:
+    TreeNode* invertTree(TreeNode* root) {
+        if (!root) return nullptr;
+        TreeNode* l = invertTree(root->left);
+        TreeNode* r = invertTree(root->right);
+        root->left = r;
+        root->right = l;
+        return root;
+    }
+};`;
+    const trace = traceCase('cpp', code, { input: '[4,2,7,1,3,6,9]', expected: '[4,7,2,9,6,3,1]' });
+    expect(trace.result.verdict).toBe('pass');
+    const root = trace.steps.flatMap((s) => s.locals).find((l) => l.name === 'root' && l.kind === 'tree');
+    expect(root).toBeDefined();
+    const v = root!.value as { val: number };
+    expect(v.val).toBe(4);
+  }, 30_000);
+
+  it('accepts a TreeNode arg with a non-tree return (maxDepth)', () => {
+    const code = `class Solution {
+public:
+    int maxDepth(TreeNode* root) {
+        if (!root) return 0;
+        return 1 + max(maxDepth(root->left), maxDepth(root->right));
+    }
+};`;
+    const trace = traceCase('cpp', code, {
+      input: '[3,9,20,null,null,15,7]',
+      expected: '3',
+    });
+    expect(trace.result.verdict).toBe('pass');
+    expect(trace.steps.flatMap((s) => s.locals).some((l) => l.kind === 'tree')).toBe(true);
+  }, 30_000);
+
   it('reports a compile error as an error verdict, not a crash', () => {
     const trace = traceCase('cpp', 'class Solution { public: int f(int x){ return y; } };', {
       input: '3',

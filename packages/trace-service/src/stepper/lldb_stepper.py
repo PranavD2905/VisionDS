@@ -190,12 +190,76 @@ def _snapshot(frame, cur_line):
                 continue
         seen.add(name)
         state = {"truncated": False}
-        value = _convert(v, 0, state)
-        snap = {"name": name, "kind": _kind_of(v.GetTypeName() or "", value), "value": value}
+        kind, value = _kind_value(v, state)
+        snap = {"name": name, "kind": kind, "value": value}
         if state["truncated"]:
             snap["truncated"] = True
         out.append(snap)
     return out
+
+
+# ------------------------------------------------ pointer-linked structures
+
+def _node_val(node, state):
+    """The `val` member of a ListNode/TreeNode, as a JSON scalar."""
+    val = node.GetChildMemberWithName("val")
+    if not val.IsValid():
+        val = node.GetChildMemberWithName("value")
+    return _convert(val, 1, state) if val.IsValid() else None
+
+
+def _linked_list(ptr, state):
+    """Walk a ListNode* into {vals, cyclesTo} — cyclesTo is the index a tail
+    points back to (Floyd-style cycle problems), else None."""
+    vals = []
+    seen = {}
+    cur = ptr
+    cycles_to = None
+    while cur.IsValid() and cur.GetValueAsUnsigned() != 0:
+        addr = cur.GetValueAsUnsigned()
+        if addr in seen:
+            cycles_to = seen[addr]
+            break
+        if len(vals) >= CAPS["MAX_COLLECTION_ITEMS"]:
+            state["truncated"] = True
+            break
+        seen[addr] = len(vals)
+        node = cur.Dereference()
+        vals.append(_node_val(node, state))
+        cur = node.GetChildMemberWithName("next")
+    return {"vals": vals, "cyclesTo": cycles_to}
+
+
+def _tree(ptr, state, budget):
+    """Recursively convert a TreeNode* into {val, left, right} (children null or
+    nested), capped by a shared node budget."""
+    if not ptr.IsValid() or ptr.GetValueAsUnsigned() == 0:
+        return None
+    if budget[0] <= 0:
+        state["truncated"] = True
+        return None
+    budget[0] -= 1
+    node = ptr.Dereference()
+    return {
+        "val": _node_val(node, state),
+        "left": _tree(node.GetChildMemberWithName("left"), state, budget),
+        "right": _tree(node.GetChildMemberWithName("right"), state, budget),
+    }
+
+
+def _kind_value(v, state):
+    """(kind, value) for a variable — intercepts ListNode*/TreeNode* pointers
+    (whose kind can't be read from the JSON value), else falls back to the
+    container/scalar conversion."""
+    t = v.GetType()
+    if t.IsValid() and t.IsPointerType():
+        pointee = (t.GetPointeeType().GetName() or "") if t.GetPointeeType() else ""
+        if "ListNode" in pointee:
+            return "linkedlist", _linked_list(v, state)
+        if "TreeNode" in pointee:
+            return "tree", _tree(v, state, [CAPS["MAX_COLLECTION_ITEMS"]])
+    value = _convert(v, 0, state)
+    return _kind_of(v.GetTypeName() or "", value), value
 
 
 # ------------------------------------------------------------------- stepping

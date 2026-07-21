@@ -779,6 +779,57 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .map-val .flash { padding: 6px 12px; }
 
+/* linked list — nodes chained by drawn arrows, ending in null or a cycle note */
+.ll-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+}
+.ll-node-wrap { display: flex; align-items: center; gap: 2px; }
+.ll-node { min-width: 46px; }
+.ll-arrow { display: block; flex-shrink: 0; }
+.ll-arrow path {
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ll-null {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  padding: 0 4px;
+}
+.ll-cycle {
+  margin-top: 10px;
+  color: var(--warn);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* binary tree — in-order layout, nodes positioned over drawn edges */
+.struct-tree { min-width: 140px; }
+.tree-canvas { position: relative; margin: 4px auto 2px; }
+.tree-edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.tree-edges line { stroke: var(--border-strong); stroke-width: 1.5; }
+.tree-node {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cell-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+}
+.tree-node .flash { padding: 0; background: none !important; }
+
 /* set — unordered chips */
 .chip-row {
   display: flex;

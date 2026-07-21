@@ -474,6 +474,167 @@ const SetView: FC<ViewProps> = ({ snap }) => {
   );
 };
 
+/** A drawn → arrow between linked-list nodes. */
+function LLArrow({ delay = 0 }: { delay?: number }) {
+  const reduced = useReducedMotion();
+  return (
+    <svg className="ll-arrow" viewBox="0 0 26 12" width="26" height="12" aria-hidden="true">
+      <motion.path
+        d="M1 6 H19 M15 2 L20 6 L15 10"
+        pathLength={1}
+        initial={reduced ? false : { pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 0.28, ease: drawEase, delay: delay + 0.06 }}
+      />
+    </svg>
+  );
+}
+
+interface LinkedListValue {
+  vals?: JsonValue[];
+  cyclesTo?: number | null;
+}
+
+const LinkedListView: FC<ViewProps> = ({ snap }) => {
+  const reduced = useReducedMotion();
+  const v = (snap.value ?? {}) as LinkedListValue;
+  const vals = Array.isArray(v.vals) ? v.vals : [];
+  const cyclesTo = typeof v.cyclesTo === 'number' ? v.cyclesTo : null;
+  const delay = useMountStagger();
+  return (
+    <Frame name={snap.name} tag={`list · ${vals.length}`} truncated={snap.truncated} className="struct-list">
+      <div className="ll-row">
+        <AnimatePresence mode="popLayout">
+          {vals.map((val, i) => (
+            <motion.div
+              className="ll-node-wrap"
+              key={i}
+              layout="position"
+              initial={reduced ? false : { opacity: 0, scale: 0.5 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.5, transition: { duration: 0.14 } }}
+              transition={{ ...spring, delay: delay(i) }}
+            >
+              <div className="cell ll-node">
+                <Flash value={val} delay={delay(i)} />
+              </div>
+              {i < vals.length - 1 && <LLArrow delay={delay(i)} />}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        {vals.length === 0 && <div className="empty-slot">null</div>}
+        {vals.length > 0 && cyclesTo === null && (
+          <>
+            <LLArrow />
+            <span className="ll-null" aria-label="null">
+              ∅
+            </span>
+          </>
+        )}
+      </div>
+      {cyclesTo !== null && (
+        <div className="ll-cycle">↺ tail links back to node #{cyclesTo}</div>
+      )}
+    </Frame>
+  );
+};
+
+interface TreeValue {
+  val: JsonValue;
+  left: TreeValue | null;
+  right: TreeValue | null;
+}
+interface TreeNodeLayout {
+  id: number;
+  val: JsonValue;
+  col: number;
+  depth: number;
+}
+interface TreeEdge {
+  from: number;
+  to: number;
+}
+
+/** In-order column assignment (classic non-overlapping binary layout). */
+function layoutTree(root: TreeValue | null) {
+  const nodes: TreeNodeLayout[] = [];
+  const edges: TreeEdge[] = [];
+  let col = 0;
+  let id = 0;
+  let maxDepth = 0;
+  const visit = (node: TreeValue | null, depth: number): number | null => {
+    if (!node || typeof node !== 'object') return null;
+    const leftId = visit(node.left, depth + 1);
+    const myId = id++;
+    nodes.push({ id: myId, val: node.val, col: col++, depth });
+    maxDepth = Math.max(maxDepth, depth);
+    if (leftId !== null) edges.push({ from: myId, to: leftId });
+    const rightId = visit(node.right, depth + 1);
+    if (rightId !== null) edges.push({ from: myId, to: rightId });
+    return myId;
+  };
+  visit(root, 0);
+  return { nodes, edges, cols: col, depth: maxDepth };
+}
+
+const COL_W = 56;
+const ROW_H = 66;
+const NODE = 40;
+
+const TreeView: FC<ViewProps> = ({ snap }) => {
+  const reduced = useReducedMotion();
+  const root = (snap.value ?? null) as TreeValue | null;
+  const { nodes, edges, cols, depth } = layoutTree(root);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const width = Math.max(cols, 1) * COL_W;
+  const height = (depth + 1) * ROW_H;
+  const cx = (n: TreeNodeLayout) => n.col * COL_W + COL_W / 2;
+  const cy = (n: TreeNodeLayout) => n.depth * ROW_H + NODE / 2 + 4;
+  const delay = useMountStagger(0.045, 0.16, 24);
+
+  return (
+    <Frame name={snap.name} tag={`tree · ${nodes.length}`} truncated={snap.truncated} className="struct-tree">
+      {nodes.length === 0 ? (
+        <div className="empty-slot">null</div>
+      ) : (
+        <div className="tree-canvas" style={{ width, height }}>
+          <svg className="tree-edges" width={width} height={height} aria-hidden="true">
+            {edges.map((e) => {
+              const a = byId.get(e.from)!;
+              const b = byId.get(e.to)!;
+              return (
+                <motion.line
+                  key={`${e.from}-${e.to}`}
+                  x1={cx(a)}
+                  y1={cy(a)}
+                  x2={cx(b)}
+                  y2={cy(b)}
+                  pathLength={1}
+                  initial={reduced ? false : { pathLength: 0, opacity: 0 }}
+                  animate={{ pathLength: 1, opacity: 1 }}
+                  transition={{ duration: 0.4, ease: drawEase, delay: delay(b.depth) }}
+                />
+              );
+            })}
+          </svg>
+          {nodes.map((n) => (
+            <motion.div
+              key={n.id}
+              className="tree-node"
+              style={{ left: n.col * COL_W, top: n.depth * ROW_H + 4 }}
+              initial={reduced ? false : { opacity: 0, scale: 0.4 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ ...spring, delay: delay(n.depth) }}
+            >
+              <Flash value={n.val} delay={delay(n.depth)} />
+            </motion.div>
+          ))}
+        </div>
+      )}
+    </Frame>
+  );
+};
+
 /** Compact tile for plain scalars, shown in the readout strip. */
 export const ScalarTile: FC<ViewProps> = ({ snap }) => {
   const reduced = useReducedMotion();
@@ -500,6 +661,8 @@ export const viewRegistry: Record<VarKind, FC<ViewProps>> = {
   set: SetView,
   string: StringView,
   scalar: ScalarTile,
+  linkedlist: LinkedListView,
+  tree: TreeView,
 };
 
 /** shape → component, for arrays reclassified by behavior. */
