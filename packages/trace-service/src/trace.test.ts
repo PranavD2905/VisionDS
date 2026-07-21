@@ -40,6 +40,67 @@ describe('C++ tracing via lldb', () => {
     expect(trace.result.divergenceStepIndex).toBeTypeOf('number');
   }, 30_000);
 
+  it('handles a void in-place solution (moveZeroes) by comparing the mutated arg', () => {
+    const code = `class Solution {
+public:
+    void moveZeroes(vector<int>& nums) {
+        int slow = 0;
+        for (int fast = 0; fast < (int)nums.size(); fast++) {
+            if (nums[fast] != 0) { swap(nums[slow], nums[fast]); slow++; }
+        }
+    }
+};`;
+    const trace = traceCase('cpp', code, { input: '[0,1,0,3,12]', expected: '[1,3,12,0,0]' });
+    expect(trace.result.verdict).toBe('pass');
+    expect(trace.result.actual).toEqual([1, 3, 12, 0, 0]);
+    // nums and the two pointers are all visible
+    const names = new Set(trace.steps.flatMap((s) => s.locals.map((l) => l.name)));
+    expect(names.has('nums')).toBe(true);
+    expect(names.has('slow')).toBe(true);
+    expect(names.has('fast')).toBe(true);
+  }, 30_000);
+
+  it('binds vector<char> from the signature (reverseString)', () => {
+    const code = `class Solution {
+public:
+    void reverseString(vector<char>& s) {
+        int l = 0, r = (int)s.size() - 1;
+        while (l < r) { swap(s[l], s[r]); l++; r--; }
+    }
+};`;
+    const trace = traceCase('cpp', code, {
+      input: '["h","e","l","l","o"]',
+      expected: '["o","l","l","e","h"]',
+    });
+    expect(trace.result.verdict).toBe('pass');
+    const s = trace.steps.flatMap((st) => st.locals).find((l) => l.name === 's');
+    expect(s?.kind).toBe('array');
+  }, 30_000);
+
+  it('exposes a std::stack as an ordered array (valid parentheses)', () => {
+    const code = `class Solution {
+public:
+    bool isValid(string s) {
+        stack<char> st;
+        for (char c : s) {
+            if (c == '(' || c == '[' || c == '{') st.push(c);
+            else {
+                if (st.empty()) return false;
+                char t = st.top(); st.pop();
+                if ((c == ')' && t != '(') || (c == ']' && t != '[') || (c == '}' && t != '{'))
+                    return false;
+            }
+        }
+        return st.empty();
+    }
+};`;
+    const trace = traceCase('cpp', code, { input: '"()[]{}"', expected: 'true' });
+    expect(trace.result.verdict).toBe('pass');
+    const st = trace.steps.flatMap((s) => s.locals).find((l) => l.name === 'st');
+    expect(st?.kind).toBe('array');
+    expect(Array.isArray(st?.value)).toBe(true);
+  }, 30_000);
+
   it('reports a compile error as an error verdict, not a crash', () => {
     const trace = traceCase('cpp', 'class Solution { public: int f(int x){ return y; } };', {
       input: '3',

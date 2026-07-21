@@ -1,7 +1,7 @@
 import type { JsonValue, TestCase } from '@visionds/trace-schema';
 import { parseArgs } from '../../parseInput';
-import { findCppEntry } from './entry';
-import { inferCppArg } from './infer';
+import { extractSignature, findCppEntry } from './entry';
+import { cppLiteralForType, inferCppArg } from './infer';
 
 export const RESULT_SENTINEL = '__VISIONDS_RESULT__';
 
@@ -67,21 +67,36 @@ const PRELUDE = [
  */
 export function generateCppProgram(code: string, testCase: TestCase): GeneratedProgram {
   const entry = findCppEntry(code);
+  const sig = extractSignature(code, entry);
   const args: JsonValue[] = parseArgs(testCase.input);
+
+  // Use the student's declared parameter types when the signature parsed and
+  // matches the argument count; otherwise infer each type from its JSON value.
+  const useSig = sig !== null && sig.params.length === args.length;
   const decls = args.map((v, i) => {
+    const declared = useSig ? sig!.params[i]!.valueType : '';
+    if (declared) return `  ${declared} a${i} = ${cppLiteralForType(declared, v)};`;
     const a = inferCppArg(v);
     return `  ${a.type} a${i} = ${a.literal};`;
   });
+
   const argList = args.map((_, i) => `a${i}`).join(', ');
   const call = entry.className
     ? `${entry.className}().${entry.name}(${argList})`
     : `${entry.name}(${argList})`;
 
+  // In-place (void) solutions: run the call, then serialize the mutated
+  // argument (the first non-const reference) as the answer to compare.
+  const isVoid = useSig && sig!.returnType === 'void';
+  const callAndResult = isVoid
+    ? [`  ${call};`, `  string __out = __vds::j(a${voidTargetIndex(sig!)});`]
+    : [`  auto __r = ${call};`, '  string __out = __vds::j(__r);'];
+
   const main = [
     'int main(){',
     ...decls,
-    `  auto __r = ${call};`,
-    `  cout << "${RESULT_SENTINEL}" << __vds::j(__r) << "\\n";`,
+    ...callAndResult,
+    `  cout << "${RESULT_SENTINEL}" << __out << "\\n";`,
     '  return 0;',
     '}',
   ];
@@ -99,4 +114,10 @@ export function generateCppProgram(code: string, testCase: TestCase): GeneratedP
     studentStart,
     studentEnd,
   };
+}
+
+/** The argument a void solution mutates: first non-const reference, else the first. */
+function voidTargetIndex(sig: { params: { mutableRef: boolean }[] }): number {
+  const idx = sig.params.findIndex((p) => p.mutableRef);
+  return idx >= 0 ? idx : 0;
 }

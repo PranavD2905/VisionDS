@@ -113,6 +113,21 @@ def _convert(v, depth, state):
         summ = v.GetSummary() or v.GetValue() or v.GetTypeName()
         return str(summ)[: CAPS["MAX_STRING_LEN"]]
 
+    # container adapters (stack / queue / priority_queue) hold their elements in
+    # an underlying member `c`; expose that as an ordered array so the client's
+    # behavior-based shape inference can tag it stack vs queue.
+    if re.search(r"\b(stack|queue|priority_queue)<", tn_norm):
+        c = v.GetChildMemberWithName("c")
+        target = c if c.IsValid() and c.GetNumChildren() >= 0 else v
+        items = []
+        n = target.GetNumChildren()
+        for i in range(min(n, CAPS["MAX_COLLECTION_ITEMS"])):
+            items.append(_convert(target.GetChildAtIndex(i), depth + 1, state))
+        if n > CAPS["MAX_COLLECTION_ITEMS"]:
+            state["truncated"] = True
+            items.append("…")
+        return items
+
     if _is_map(tn_norm):
         out = {}
         n = v.GetNumChildren()
