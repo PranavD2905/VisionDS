@@ -1,22 +1,89 @@
 import { cpp } from '@codemirror/lang-cpp';
+import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 import CodeMirror from '@uiw/react-codemirror';
+import { consumeCapture, pullCaptures, saveRun } from '@visionds/auth';
 import { twoSumFailTrace, type ExecutionTrace, type TestCase } from '@visionds/trace-schema';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { AccountMenu } from '../auth/AccountMenu';
+import { useAuth } from '../auth/AuthProvider';
+import { cathodeEditor } from '../editorTheme';
 import { DEFAULT_LANGUAGE, LANGUAGES, langById } from '../languages';
+import { readImportFromHash, type ImportProblem } from '../lib/import';
 import { runnerFor } from '../runner';
 import { useVis } from '../store';
 
+interface LoadRun {
+  language: string;
+  code: string;
+  cases: TestCase[];
+  problem?: ImportProblem;
+}
+
 export function PastePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const setTraces = useVis((s) => s.setTraces);
+  const { user, client } = useAuth();
   const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
   const [code, setCode] = useState(() => langById(DEFAULT_LANGUAGE).starterCode);
   const [cases, setCases] = useState<TestCase[]>(() => langById(DEFAULT_LANGUAGE).starterCases);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [imported, setImported] = useState<ImportProblem | null>(null);
+
+  // Hydrate from a `#import=…` handoff written by the browser extension.
+  // Runs once on mount; clears the hash so a refresh doesn't re-import.
+  useEffect(() => {
+    const payload = readImportFromHash();
+    if (!payload) return;
+    const def = langById(payload.language);
+    setLanguage(def.id);
+    setCode(payload.code || def.starterCode);
+    setCases(payload.cases.length ? payload.cases : def.starterCases);
+    setImported(payload.problem ?? {});
+    setError(null);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-open a run picked from history (navigated here with location state).
+  useEffect(() => {
+    const loadRun = (location.state as { loadRun?: LoadRun } | null)?.loadRun;
+    if (!loadRun) return;
+    const def = langById(loadRun.language);
+    setLanguage(def.id);
+    setCode(loadRun.code || def.starterCode);
+    setCases(loadRun.cases.length ? loadRun.cases : def.starterCases);
+    setImported(loadRun.problem ?? null);
+    setError(null);
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
+  // Pull the newest capture synced from the signed-in browser extension.
+  useEffect(() => {
+    if (!client || !user) return;
+    let alive = true;
+    pullCaptures(client, 1)
+      .then((rows) => {
+        const cap = rows[0];
+        if (!alive || !cap) return;
+        const def = langById(cap.language);
+        setLanguage(def.id);
+        setCode(cap.code || def.starterCode);
+        setCases(cap.testcases.length ? cap.testcases : def.starterCases);
+        setImported(cap.problem ?? {});
+        setError(null);
+        void consumeCapture(client, cap.id).catch(() => {});
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [client, user]);
 
   const updateCase = (i: number, patch: Partial<TestCase>) =>
     setCases((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
@@ -50,6 +117,20 @@ export function PastePage() {
     navigate('/run');
   };
 
+  // Save the run to the signed-in user's history. Best-effort: a failed save
+  // never blocks the visualization.
+  const persistRun = (traces: ExecutionTrace[]) => {
+    if (!client || !user) return;
+    const shown = traces.find((t) => t.result.verdict !== 'pass') ?? traces[0];
+    void saveRun(client, {
+      language,
+      code,
+      testcases: cases,
+      problem: imported ?? null,
+      verdict: shown?.result.verdict ?? null,
+    }).catch(() => {});
+  };
+
   const onRun = async () => {
     setBusy(true);
     setError(null);
@@ -71,6 +152,7 @@ export function PastePage() {
           }),
         );
       }
+      persistRun(traces);
       show(traces);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -80,17 +162,58 @@ export function PastePage() {
     }
   };
 
-  const editorLang = language === 'cpp' ? cpp() : python();
+  const editorLang = language === 'cpp' ? cpp() : language === 'java' ? java() : python();
 
   return (
     <div className="paste-page">
       <header className="page-header">
-        <h1>VisionDS</h1>
-        <p className="tagline">Paste your code, watch it run, see exactly where it breaks.</p>
-        {/* slot: "imported from LeetCode" metadata lands here when the extension exists */}
-        <div className="import-slot">
-          Paste manually below — importing straight from LeetCode is coming soon.
+        <div className="app-bar">
+          <Link to="/" className="wordmark">
+            <span className="wordmark-mark" aria-hidden="true">
+              ▚
+            </span>
+            <span>
+              VISION<span className="wordmark-dim">DS</span>
+            </span>
+          </Link>
+          <span className="app-crumb">/ workbench</span>
+          <div className="app-bar-right">
+            <Link to="/product" className="app-bar-link">
+              Spec
+            </Link>
+            <AccountMenu />
+          </div>
         </div>
+
+        <p className="stamp">
+          <span className="led" aria-hidden="true" />
+          {langById(language).runsIn === 'server' ? 'Trace service · port 8787' : 'Local runtime · this tab'}
+        </p>
+        <h1>Paste it. Watch it run.</h1>
+        <p className="tagline">
+          A real execution gets recorded, then replayed as a diagram — and the failing step is one
+          click away.
+        </p>
+        {/* slot: "imported from LeetCode" metadata lands here via the extension handoff */}
+        {imported ? (
+          <div className="import-badge">
+            Imported from LeetCode
+            {imported.title ? (
+              imported.url ? (
+                <a href={imported.url} target="_blank" rel="noreferrer">
+                  {imported.title}
+                </a>
+              ) : (
+                <strong>{imported.title}</strong>
+              )
+            ) : null}
+          </div>
+        ) : (
+          <div className="import-slot">
+            Paste below, or lift the code &amp; testcases straight off LeetCode with the VisionDS
+            extension.
+          </div>
+        )}
       </header>
 
       <section className="editor-section">
@@ -123,8 +246,8 @@ export function PastePage() {
         <CodeMirror
           value={code}
           height="320px"
-          theme="dark"
-          extensions={[editorLang]}
+          theme="none"
+          extensions={[editorLang, ...cathodeEditor]}
           onChange={setCode}
         />
       </section>

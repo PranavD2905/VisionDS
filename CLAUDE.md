@@ -84,8 +84,26 @@ pnpm workspaces monorepo:
   compact trace digest, gets `{summary, annotations[{stepIndex, text}]}`;
   sanitization drops out-of-range stepIndexes. API key: user-supplied,
   localStorage only. A Claude explainer can plug in beside it.
-- `apps/extension` — Manifest V3 Chrome extension (plain HTML/JS, **no build
-  step**, load-unpacked). On a LeetCode problem page its popup runs an extractor
+- `packages/auth` — `@visionds/auth`, the shared, environment-agnostic Supabase
+  wrapper (used by web and extension). `createAuthClient`/`isConfigured`/
+  `configFromEnv` (graceful no-op when unconfigured), auth helpers
+  (`signUp`/`signInWithPassword`/`signInWithGoogle`/`signOut`/`onAuthChange`),
+  and RLS-guarded data access (`saveRun`/`listRuns`, `pushCapture`/
+  `pullCaptures`/`consumeCapture`, `getProfile`/`incrementExplainCount`). Row
+  types mirror `supabase/migrations/*.sql`. The whole thing takes config *in* —
+  it never reads `import.meta.env`/`process.env` — so both surfaces reuse it.
+- `supabase/` — schema version control. `migrations/*.sql` (timestamped,
+  append-only) hold the `runs`/`captures`/`profiles` tables, **RLS policies**
+  (the authorization layer — `user_id = auth.uid()`, so clients talk to Postgres
+  directly with no API tier), a profile auto-create trigger, and the
+  `increment_explain_count` RPC. `config.toml` for `supabase start` local dev.
+- `apps/extension` — Manifest V3 Chrome extension. **Now has a small esbuild step**
+  (`build.mjs` → `dist/`) so the popup imports `@visionds/auth`; Supabase config
+  is injected via build-time `define` (auth-free when unset). Optional Google
+  sign-in via `chrome.identity.launchWebAuthFlow` (PKCE, session in
+  `chrome.storage`); signed in, **Open in VisionDS** pushes a `captures` row the
+  web app pulls, else the URL-hash handoff is the fallback. On a LeetCode problem
+  page its popup runs an extractor
   in the page's MAIN world (`chrome.scripting.executeScript`) to read the Monaco
   editor code, the selected language (`global_lang` → python/cpp/java), the
   problem title/slug, and example testcases parsed from the statement's
@@ -93,14 +111,39 @@ pnpm workspaces monorepo:
   shown editable in the popup (so LeetCode DOM drift never blocks a handoff),
   then encoded as UTF-8-safe base64url into the site URL fragment
   (`/#import=…`) and opened in a new tab. The fragment never leaves the browser.
-- `apps/web` — React + Vite + TS. `PastePage` (CodeMirror 6, per-language
-  starter code + a language selector; Python/C++ live, Java "soon") →
+- `apps/web` — React + Vite + TS. **Design system: "CATHODE-83"** — an
+  amber-phosphor CRT workstation. All type is monospace (IBM Plex Mono, with
+  Silkscreen for stamped micro-labels); structure is hairlines and box rules,
+  never shadow; Phosphor Amber `--accent` marks live state, green/red carry
+  verdicts. A fixed scanline+vignette overlay (`body::after`) puts every surface
+  behind glass. Tokens live in `src/styles.css` `:root`, so the whole app —
+  visualizer included — repaints from there. CodeMirror gets a matching
+  three-phosphor syntax theme in `src/editorTheme.ts` (`theme="none"` +
+  `cathodeEditor`), since CodeMirror builds its stylesheet outside the cascade.
+  **Routes:** `/` `LandingPage` (marketing: CRT hero replaying the failing
+  two-sum in CSS, how-it-runs, feature grid, creed, language table),
+  `/product` `ProductPage` (spec sheet: pipeline ASCII, the contract, language
+  matrix, structures, caps, privacy tiers, honest status), `/app` `PastePage`,
+  `/run` `RunPage`, plus the auth routes. Marketing pages share
+  `components/site/SiteChrome.tsx` (nav + footer) and `Reveal.tsx`
+  (IntersectionObserver scroll reveal); marketing CSS is `src/site.css`.
+  The extension still hands off at `/#import=…`; `LandingPage` forwards that
+  fragment to `/app` untouched, so installed builds keep working.
+  `PastePage` (CodeMirror 6, per-language starter code + a language selector) →
   `RunPage`: CodePanel (current-line highlight),
   Stage + `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips),
   Transport (play/pause/speed/step/scrub — scrubbing renders `steps[cursor]`,
   no re-execution), VerdictBanner ("Jump to failing step" seeks to
   `divergenceStepIndex`), ExplainPanel. State: Zustand store (`store.ts`) —
   immutable traces + a cursor; the cursor is the only thing playback mutates.
+  **Auth (optional, additive)** lives in `src/auth/`: `AuthProvider`/`useAuth`
+  (session hydrated + kept in sync), `/login`+`/signup` (email/password + Google),
+  `/auth/callback`, `/history`, and `AccountMenu`. Wired to Supabase via
+  `src/auth/config.ts` (reads `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`); with
+  those unset the app runs fully signed-out. Runs auto-save on completion;
+  extension captures are pulled on load; the explainer is sign-in-gated only when
+  auth is configured. Client-side-first is intact — Python still never leaves the
+  browser.
 
 ## Commands
 
@@ -108,9 +151,13 @@ pnpm workspaces monorepo:
 pnpm install
 pnpm dev        # web app on http://localhost:5173
 pnpm --filter @visionds/trace-service dev   # C++/Java trace service on :8787 (needs clang++/lldb; JDK for Java)
-pnpm test       # vitest: schema + explainer + Pyodide tracer + C++/Java trace-service
+pnpm test       # vitest: schema + explainer + auth + Pyodide tracer + C++/Java trace-service
 pnpm typecheck  # tsc --noEmit across all packages
-pnpm build      # production build
+pnpm build      # production build (web)
+
+pnpm --filter @visionds/extension build   # esbuild the extension → apps/extension/dist/
+# Auth needs a Supabase project: copy apps/web/.env.example → apps/web/.env and fill in.
+# supabase db push (or paste supabase/migrations/*.sql into the SQL editor) applies the schema.
 ```
 
 The web app finds the service at `VITE_TRACE_SERVICE` (default
@@ -143,8 +190,25 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   example-testcase parsing verified in Node; web typecheck + prod build clean.
   Not yet exercised against live LeetCode DOM in a real browser (extractor is
   best-effort with editable-in-popup fallback); no toolbar icon PNGs bundled.
+- Done & verified: **accounts & auth (optional, additive)** via Supabase —
+  `packages/auth` shared wrapper, `supabase/migrations` (tables + RLS + profile
+  trigger + explain-count RPC), web login/signup (email + Google), account menu,
+  run-history save + `/history`, sign-in-gated explainer, and the extension's
+  esbuild step + Google sign-in + account capture sync. Whole workspace
+  typechecks, web prod build is clean, 12 unit tests pass (incl. new
+  `packages/auth` config/mapping tests), and the extension bundles (auth-free
+  and with injected Supabase config). **Not yet exercised against a live Supabase
+  project** — needs a project + Google OAuth client provisioned (see
+  `apps/web/.env.example`); the OAuth flows and RLS are untested end-to-end.
+- Done & verified (2026-07-25): **full UI rehaul to CATHODE-83** — new token
+  system + fonts, landing page at `/`, spec sheet at `/product`, workbench moved
+  to `/app` (auth + history redirects follow), restyled app shell and auth
+  pages, phosphor CodeMirror theme. Typecheck, prod build and all 12 unit tests
+  pass; landing/spec/workbench and a live Python run verified in the browser at
+  desktop and 420px.
 - Not built yet: production sandbox for the trace service, Claude explainer
-  option, graph/adjacency visualization.
+  option, graph/adjacency visualization. Known minor: bundling supabase-js grew
+  the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.
 
 ## Repo conventions
 

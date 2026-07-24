@@ -1,0 +1,21 @@
+# Minimal Supabase CLI config for local dev (`supabase start`).
+# The hosted project's real settings live in the dashboard; this file lets you
+# run Postgres + Auth locally and apply migrations against it.
+project_id = "visionds"
+
+[db]
+port = 54322
+major_version = 15
+
+[auth]
+enabled = true
+# Point these at your local web app during development.
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173/auth/callback"]
+
+[auth.external.google]
+enabled = true
+# Set these via env when running locally; configure the real values in the
+# hosted dashboard (Auth → Providers → Google).
+client_id = "env(SUPABASE_AUTH_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_GOOGLE_SECRET)"

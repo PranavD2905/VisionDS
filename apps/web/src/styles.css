@@ -1,40 +1,44 @@
 /* ============================================================================
-   VisionDS — "The Quiet Workbench"
-   A near-black slate stack lit by one accent (Livewire). Flat by default:
-   depth is tonal, never shadow. Monospace is data; system sans is chrome.
+   VisionDS — "CATHODE-83"
+   An amber-phosphor CRT workstation. Everything is monospace; structure is
+   drawn with hairlines and box rules, never with shadow. One accent (Phosphor
+   Amber) marks live state; green/red phosphor carry verdicts. The page wears
+   scanline glass and a vignette so the whole surface reads as a screen.
    ========================================================================== */
 
 :root {
-  /* Slate ramp — depth by tonal layering, bg → panel → inset → cell */
-  --bg: #0e1117;          /* Workbench Black — the page */
-  --panel: #161b26;       /* Panel Slate — structural panels */
-  --panel-2: #1c2333;     /* Inset Slate — recessed controls */
-  --cell-bg: #232c40;     /* Cell Slate — the data layer */
-  --border: #2a3347;      /* Hairline — every 1px divider */
-  --border-strong: #384158;
+  /* Warm carbon ramp — depth by tonal layering, bg → panel → inset → cell */
+  --bg: #0a0908;          /* Carbon — the page behind the glass */
+  --bg-deep: #060504;     /* Bezel black — outside the readout */
+  --panel: #121110;       /* Panel — structural surfaces */
+  --panel-2: #1a1817;     /* Inset — recessed controls */
+  --cell-bg: #24211d;     /* Cell — the data layer */
+  --border: #2e2a26;      /* Hairline — every 1px divider */
+  --border-strong: #46403a;
 
   /* Ink */
-  --text: #e6e9f0;        /* Readout White */
-  --muted: #8b93a7;       /* Muted Steel */
+  --text: #f3e9d8;        /* Readout — warm phosphor white */
+  --muted: #9a8f7e;       /* Dim phosphor */
 
-  /* Accent — Livewire: live state only */
-  --accent: #4f8ef7;
-  --accent-strong: #74a6fa;
-  --pulse: #4f8ef766;
-  --accent-wash: color-mix(in srgb, var(--accent) 14%, transparent);
-  --accent-line: color-mix(in srgb, var(--accent) 20%, transparent);
+  /* Accent — Phosphor Amber (P3): live state only */
+  --accent: #ffae2b;
+  --accent-strong: #ffcb6b;
+  --pulse: #ffae2b66;
+  --accent-wash: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 26%, transparent);
+  --glow: 0 0 14px color-mix(in srgb, var(--accent) 40%, transparent);
 
-  /* Semantic verdicts */
-  --pass: #2ea36c;
-  --fail: #e05252;
-  --warn: #d9a13b;
-  --ai: #7c5cff;          /* AI Violet — opt-in explain layer only */
+  /* Semantic verdicts — P1 green, warning red */
+  --pass: #5bd97f;
+  --fail: #ff6a55;
+  --warn: #ffd166;
+  --ai: #5ec8ff;          /* AI Cyan — opt-in explain layer only */
 
-  /* Radius */
-  --r-xs: 4px;
-  --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 10px;
+  /* Radius — hardware-tight; this is an instrument, not a card deck */
+  --r-xs: 2px;
+  --r-sm: 3px;
+  --r-md: 4px;
+  --r-lg: 5px;
   --r-pill: 999px;
 
   /* Spacing scale */
@@ -46,9 +50,10 @@
   --s-6: 32px;
   --s-7: 48px;
 
-  /* Type */
-  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  /* Type — the terminal speaks one voice; Silkscreen is the stamped label */
+  --font-ui: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-stamp: 'Silkscreen', 'IBM Plex Mono', monospace;
 
   /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -58,6 +63,7 @@
 
   /* z-index scale */
   --z-sticky: 100;
+  --z-glass: 300;
   --z-toast: 400;
 
   color-scheme: dark;
@@ -79,9 +85,32 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* ---------- the glass ----------
+   A single fixed overlay puts every surface behind CRT scanlines, a phosphor
+   bloom and a bezel vignette. Pointer-events none: it is purely optical. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--z-glass);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.22) 0px,
+      rgba(0, 0, 0, 0.22) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+  mix-blend-mode: multiply;
+  opacity: 0.55;
+}
+
+/* terminals invert their selection — so does this one */
 ::selection {
-  background: color-mix(in srgb, var(--accent) 32%, transparent);
-  color: #fff;
+  background: var(--accent);
+  color: var(--bg-deep);
 }
 
 code, pre, .cell, .scalar-tile, .kv-chip, .code-panel, kbd {
@@ -100,17 +129,20 @@ code, pre, .cell, .scalar-tile, .kv-chip, .code-panel, kbd {
 
 h1 {
   margin: 0;
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 700;
-  letter-spacing: -0.5px;
+  letter-spacing: 0.02em;
   line-height: 1.1;
+  text-transform: uppercase;
   text-wrap: balance;
 }
 h2 {
   margin: 0 0 var(--s-1);
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: -0.1px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .hint {
   color: var(--muted);
@@ -153,7 +185,8 @@ button {
   padding: 6px 12px;
   cursor: pointer;
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
   transition: border-color var(--dur-1) ease, background var(--dur-1) ease, color var(--dur-1) ease;
 }
 button:hover:not(:disabled) { border-color: var(--accent); }
@@ -168,7 +201,40 @@ button:disabled { opacity: 0.45; cursor: default; }
   padding: var(--s-7) var(--s-5) 96px;
 }
 
+/* the workbench rail: same wordmark as the site, denser */
+.app-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding-bottom: var(--s-4);
+  margin-bottom: var(--s-6);
+  border-bottom: 1px solid var(--border);
+}
+.app-crumb {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.app-bar-right { display: flex; align-items: center; gap: var(--s-4); margin-left: auto; }
+.app-bar-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition: color var(--dur-1) ease;
+}
+.app-bar-link:hover { color: var(--accent); }
+
 .page-header { margin-bottom: var(--s-6); }
+.page-header .stamp { display: flex; width: fit-content; margin-bottom: var(--s-3); }
+.page-header h1 {
+  display: flex;
+  width: fit-content;
+  font-size: clamp(24px, 4vw, 34px);
+  letter-spacing: 0.01em;
+}
 .page-header h1 { display: inline-flex; align-items: baseline; }
 /* a small live caret — the "watch it run" cursor, on-brand and quiet */
 .page-header h1::after {
@@ -202,7 +268,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   font-size: 13px;
 }
 .import-slot::before {
-  content: 'soon';
+  content: 'tip';
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -212,6 +278,35 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-radius: var(--r-xs);
   padding: 1px 5px;
 }
+.import-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  border: 1px solid var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: var(--r-lg);
+  padding: 8px 14px;
+  color: var(--text);
+  font-size: 13px;
+}
+.import-badge::before {
+  content: 'imported';
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-xs);
+  padding: 1px 5px;
+}
+.import-badge a,
+.import-badge strong {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.import-badge a:hover { text-decoration: underline; }
 
 .editor-section { margin-bottom: var(--s-6); }
 .cases-section { margin-bottom: var(--s-5); }
@@ -269,6 +364,11 @@ button:disabled { opacity: 0.45; cursor: default; }
   overflow: hidden;
 }
 .editor-section .cm-editor.cm-focused { border-color: var(--accent); outline: none; }
+
+/* Colors come from editorTheme.ts (CodeMirror builds its own stylesheet); this
+   only forces the editor onto the same typeface as the rest of the machine. */
+.cm-editor,
+.cm-editor .cm-scroller { font-family: var(--font-mono) !important; }
 
 .case-row {
   display: grid;
@@ -329,14 +429,18 @@ button:disabled { opacity: 0.45; cursor: default; }
 .run-btn {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
-  padding: 10px 22px;
-  font-size: 15px;
+  color: var(--bg-deep);
+  font-weight: 700;
+  padding: 11px 26px;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: var(--glow);
 }
 .run-btn:hover:not(:disabled) {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 .run-btn:active:not(:disabled) { background: var(--accent); }
 .run-btn:disabled { opacity: 0.7; } /* busy state still reads as active work */
@@ -605,6 +709,13 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-radius: calc(var(--r-md) - 1px);
   white-space: nowrap;
 }
+/* transform carrier for the swap glide: shares a layoutId so it glides between
+   slots. A moving box lifts onto a raised lane so swapping cells pass cleanly. */
+.cell-glide { display: flex; position: relative; }
+.cell-glide.moving .cell {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  border-color: var(--accent-line);
+}
 .cell-sm { min-width: 40px; font-size: 13px; }
 .cell-sm .flash { padding: 7px 6px; }
 .dense .cell { min-width: 38px; font-size: 13px; }
@@ -646,7 +757,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .pointer { display: flex; flex-direction: column; align-items: center; line-height: 1; }
 .pointer-name {
   background: var(--accent);
-  color: #fff;
+  color: var(--bg-deep);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
@@ -911,7 +1022,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .explain-clear { color: var(--muted); font-size: 12px; padding: 4px 8px; }
 .explain-label {
   background: var(--ai);
-  color: #fff;
+  color: var(--bg-deep);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.5px;
@@ -1036,3 +1147,287 @@ button:disabled { opacity: 0.45; cursor: default; }
   }
   .page-header h1::after { animation: none; opacity: 1; }
 }
+
+/* ==========================================================================
+   Auth — account menu, login/signup, run history.
+   Uses the existing tokens; renders nothing intrusive when signed-out.
+   ========================================================================== */
+
+.page-header-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* --- account menu in the header --- */
+.account-signin {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 8px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  transition: color var(--dur-1) ease, border-color var(--dur-1) ease;
+  white-space: nowrap;
+}
+.account-signin:hover { color: var(--text); border-color: var(--accent); }
+
+.account-menu { position: relative; }
+.account-avatar {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--r-pill);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+.account-avatar:hover:not(:disabled) { border-color: var(--accent); }
+
+.account-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 200px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  padding: 6px;
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.account-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.account-id strong { font-size: 13px; color: var(--text); }
+.account-id span { font-size: 12px; color: var(--muted); word-break: break-all; }
+.account-dropdown a,
+.account-dropdown button {
+  text-align: left;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: transparent;
+  border: none;
+  text-decoration: none;
+  cursor: pointer;
+}
+.account-dropdown a:hover,
+.account-dropdown button:hover { background: var(--panel-2); }
+
+/* --- login / signup page --- */
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 20px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--accent); /* the panel's power rail */
+  border-radius: var(--r-lg);
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.auth-centered { align-items: center; text-align: center; gap: 18px; }
+.auth-back {
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  align-self: flex-start;
+}
+.auth-back:hover { color: var(--text); }
+.auth-card h1 { font-size: 22px; margin: 4px 0 0; }
+.auth-sub { font-size: 14px; color: var(--muted); margin: 0; }
+
+.auth-warn {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+}
+.auth-warn code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.auth-google {
+  width: 100%;
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 500;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  color: var(--text);
+  cursor: pointer;
+}
+.auth-google:hover:not(:disabled) { border-color: var(--accent); }
+.auth-google:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-form { display: flex; flex-direction: column; gap: 12px; }
+.auth-form label { display: flex; flex-direction: column; gap: 5px; }
+.auth-form label span { font-size: 12px; color: var(--muted); }
+.auth-form input {
+  padding: 10px 12px;
+  font-size: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+}
+.auth-form input:focus { outline: none; border-color: var(--accent); }
+
+.auth-submit {
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--bg-deep);
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  margin-top: 2px;
+}
+.auth-submit:hover:not(:disabled) { background: var(--accent-strong); }
+.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.auth-error {
+  font-size: 13px;
+  color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 10%, transparent);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+}
+.auth-notice {
+  font-size: 13px;
+  color: var(--pass);
+  background: color-mix(in srgb, var(--pass) 10%, transparent);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+}
+.auth-switch { font-size: 13px; color: var(--muted); margin: 4px 0 0; text-align: center; }
+.auth-switch a { color: var(--accent); text-decoration: none; }
+.auth-switch a:hover { text-decoration: underline; }
+
+.auth-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: auth-spin 0.8s linear infinite;
+}
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .auth-spinner { animation-duration: 2.4s; }
+}
+
+/* --- run history --- */
+.history-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 20px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.history-head { display: flex; flex-direction: column; gap: 8px; }
+.history-back { font-size: 13px; color: var(--muted); text-decoration: none; }
+.history-back:hover { color: var(--text); }
+.history-head h1 { font-size: 24px; margin: 0; }
+.history-empty { color: var(--muted); font-size: 15px; }
+.history-empty a { color: var(--accent); }
+
+.history-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.history-item {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.history-item:hover { border-color: var(--border-strong); }
+.history-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.history-open:hover { background: var(--panel-2); }
+.history-title { font-size: 15px; color: var(--text); font-weight: 500; }
+.history-meta { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.history-lang {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.history-verdict {
+  font-family: var(--font-mono);
+  padding: 1px 7px;
+  border-radius: var(--r-xs);
+  font-size: 11px;
+}
+.history-verdict.pass { color: var(--pass); background: color-mix(in srgb, var(--pass) 14%, transparent); }
+.history-verdict.fail { color: var(--fail); background: color-mix(in srgb, var(--fail) 14%, transparent); }
+.history-time { color: var(--muted); margin-left: auto; }
+.history-delete {
+  padding: 0 14px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+.history-delete:hover { color: var(--fail); background: color-mix(in srgb, var(--fail) 8%, transparent); }

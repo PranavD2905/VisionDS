@@ -25,7 +25,7 @@ export function RunPage() {
     .filter((a) => a.stepIndex <= cursor)
     .at(-1);
 
-  if (!trace) return <Navigate to="/" replace />;
+  if (!trace) return <Navigate to="/app" replace />;
 
   const step = trace.steps[cursor];
   const prev = cursor > 0 ? trace.steps[cursor - 1] : undefined;
@@ -36,7 +36,7 @@ export function RunPage() {
   return (
     <div className="run-page">
       <header className="run-header">
-        <Link to="/" className="back-link">
+        <Link to="/app" className="back-link">
           ← edit code
         </Link>
         <VerdictBanner />
