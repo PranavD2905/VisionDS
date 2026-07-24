@@ -2,6 +2,7 @@ import type { JsonValue, VarKind, VarSnapshot } from '@visionds/trace-schema';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useRef, type FC, type ReactNode } from 'react';
 import { fmt } from '../../lib/format';
+import { tokenAlpha } from '../../theme/tokens';
 
 export interface ViewProps {
   snap: VarSnapshot;
@@ -15,6 +16,17 @@ const spring = { type: 'spring', stiffness: 480, damping: 34, mass: 0.9 } as con
 const drawEase = [0.16, 1, 0.3, 1] as const;
 
 /**
+ * Endpoints of the change-flash, resolved once from the semantic layer.
+ * Cached because the stage re-renders on every step and the tokens are stable
+ * for the lifetime of a theme.
+ */
+let flashCache: [string, string] | null = null;
+function flashColors(): [string, string] {
+  if (!flashCache) flashCache = [tokenAlpha('--accent', 0.4), tokenAlpha('--accent', 0)];
+  return flashCache;
+}
+
+/**
  * Entrance stagger, scoped to the mount of the calling view. Cells that
  * exist when the structure first appears build in one by one; cells added
  * later (an append mid-run) enter immediately with no queued delay.
@@ -25,16 +37,24 @@ function useMountStagger(step = 0.05, base = 0.16, cap = 14) {
     performance.now() - t0.current < 450 ? base + Math.min(i, cap) * step : 0;
 }
 
-/** Re-mounts on value change: a Livewire wash + pop marks the mutation. */
+/**
+ * Re-mounts on value change: an accent wash + pop marks the mutation.
+ *
+ * Framer Motion interpolates between concrete colors, so the endpoints are
+ * resolved from the semantic layer rather than written here — a literal would
+ * survive a retheme and flash the wrong color, which is exactly what happened
+ * with the previous palette.
+ */
 function Flash({ value, raw = false, delay = 0 }: { value: JsonValue; raw?: boolean; delay?: number }) {
   const reduced = useReducedMotion();
   const text = raw ? String(value) : fmt(value);
+  const [from, to] = flashColors();
   return (
     <motion.span
       key={text}
       className="flash"
-      initial={reduced ? false : { backgroundColor: 'rgba(79, 142, 247, 0.4)', scale: 1.12 }}
-      animate={{ backgroundColor: 'rgba(79, 142, 247, 0)', scale: 1 }}
+      initial={reduced ? false : { backgroundColor: from, scale: 1.12 }}
+      animate={{ backgroundColor: to, scale: 1 }}
       transition={{ duration: 0.4, ease: 'easeOut', delay }}
     >
       {text}

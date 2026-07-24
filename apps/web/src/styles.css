@@ -1,44 +1,23 @@
 /* ============================================================================
-   VisionDS — "CATHODE-83"
-   An amber-phosphor CRT workstation. Everything is monospace; structure is
-   drawn with hairlines and box rules, never with shadow. One accent (Phosphor
-   Amber) marks live state; green/red phosphor carry verdicts. The page wears
-   scanline glass and a vignette so the whole surface reads as a screen.
+   VisionDS — "SPECIMEN" · application shell
+   A catalogue of live modules on near-pure black. Every region of the page is
+   a bordered specimen: hairline frame, 4px radius, a stamped tag at the
+   top-left and a tabular footer that indexes it. Acid marks live state; mint
+   and red carry verdicts. Flat — no glass, no glow-for-glow's-sake.
+
+   NO COLOR VALUE MAY APPEAR IN THIS FILE. Colors come from the semantic layer
+   (theme/semantic.css), which maps roles onto primitives (theme/palette.css).
    ========================================================================== */
 
+@import './theme/palette.css';
+@import './theme/semantic.css';
+
 :root {
-  /* Warm carbon ramp — depth by tonal layering, bg → panel → inset → cell */
-  --bg: #0a0908;          /* Carbon — the page behind the glass */
-  --bg-deep: #060504;     /* Bezel black — outside the readout */
-  --panel: #121110;       /* Panel — structural surfaces */
-  --panel-2: #1a1817;     /* Inset — recessed controls */
-  --cell-bg: #24211d;     /* Cell — the data layer */
-  --border: #2e2a26;      /* Hairline — every 1px divider */
-  --border-strong: #46403a;
-
-  /* Ink */
-  --text: #f3e9d8;        /* Readout — warm phosphor white */
-  --muted: #9a8f7e;       /* Dim phosphor */
-
-  /* Accent — Phosphor Amber (P3): live state only */
-  --accent: #ffae2b;
-  --accent-strong: #ffcb6b;
-  --pulse: #ffae2b66;
-  --accent-wash: color-mix(in srgb, var(--accent) 12%, transparent);
-  --accent-line: color-mix(in srgb, var(--accent) 26%, transparent);
-  --glow: 0 0 14px color-mix(in srgb, var(--accent) 40%, transparent);
-
-  /* Semantic verdicts — P1 green, warning red */
-  --pass: #5bd97f;
-  --fail: #ff6a55;
-  --warn: #ffd166;
-  --ai: #5ec8ff;          /* AI Cyan — opt-in explain layer only */
-
-  /* Radius — hardware-tight; this is an instrument, not a card deck */
+  /* Radius — hardware-tight; this is a catalogue, not a card deck */
   --r-xs: 2px;
   --r-sm: 3px;
   --r-md: 4px;
-  --r-lg: 5px;
+  --r-lg: 6px;
   --r-pill: 999px;
 
   /* Spacing scale */
@@ -85,27 +64,8 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* ---------- the glass ----------
-   A single fixed overlay puts every surface behind CRT scanlines, a phosphor
-   bloom and a bezel vignette. Pointer-events none: it is purely optical. */
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: var(--z-glass);
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      rgba(0, 0, 0, 0.22) 0px,
-      rgba(0, 0, 0, 0.22) 1px,
-      transparent 1px,
-      transparent 3px
-    ),
-    radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
-  mix-blend-mode: multiply;
-  opacity: 0.55;
-}
+/* The SPECIMEN direction is flat and unfiltered: no overlay sits between the
+   viewer and the data. Depth comes from tonal surfaces and hairlines only. */
 
 /* terminals invert their selection — so does this one */
 ::selection {
@@ -195,10 +155,16 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 /* ---------- paste page ---------- */
 
+/* The workbench wears the same framed-module language as the marketing pages:
+   an 8px gutter, each region its own bordered card. `.frame` itself is defined
+   in site.css so both surfaces share one definition. */
 .paste-page {
-  max-width: 920px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: var(--s-7) var(--s-5) 96px;
+  padding: var(--s-2) var(--s-2) 80px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
 }
 
 /* the workbench rail: same wordmark as the site, denser */
@@ -206,9 +172,8 @@ button:disabled { opacity: 0.45; cursor: default; }
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  padding-bottom: var(--s-4);
-  margin-bottom: var(--s-6);
-  border-bottom: 1px solid var(--border);
+  padding: 0 var(--s-4);
+  height: 54px;
 }
 .app-crumb {
   color: var(--muted);
@@ -227,15 +192,17 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .app-bar-link:hover { color: var(--accent); }
 
-.page-header { margin-bottom: var(--s-6); }
+.page-header { padding: var(--s-6) var(--s-5); }
 .page-header .stamp { display: flex; width: fit-content; margin-bottom: var(--s-3); }
+/* flex (not inline-flex) so the stamp above it keeps its own line, with
+   baseline alignment for the caret that trails the title */
 .page-header h1 {
   display: flex;
+  align-items: baseline;
   width: fit-content;
   font-size: clamp(24px, 4vw, 34px);
   letter-spacing: 0.01em;
 }
-.page-header h1 { display: inline-flex; align-items: baseline; }
 /* a small live caret — the "watch it run" cursor, on-brand and quiet */
 .page-header h1::after {
   content: '';
@@ -308,8 +275,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .import-badge a:hover { text-decoration: underline; }
 
-.editor-section { margin-bottom: var(--s-6); }
-.cases-section { margin-bottom: var(--s-5); }
+.editor-section,
+.cases-section { padding: var(--s-5); }
 
 .editor-head {
   display: flex;
@@ -424,7 +391,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   gap: var(--s-3);
   align-items: center;
   flex-wrap: wrap;
-  margin-top: var(--s-5);
+  padding: var(--s-5);
 }
 .run-btn {
   background: var(--accent);
@@ -713,7 +680,7 @@ button:disabled { opacity: 0.45; cursor: default; }
    slots. A moving box lifts onto a raised lane so swapping cells pass cleanly. */
 .cell-glide { display: flex; position: relative; }
 .cell-glide.moving .cell {
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-pop);
   border-color: var(--accent-line);
 }
 .cell-sm { min-width: 40px; font-size: 13px; }
@@ -1200,7 +1167,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-menu);
   padding: 6px;
   z-index: var(--z-sticky);
   display: flex;

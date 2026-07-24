@@ -1,0 +1,46 @@
+/* ============================================================================
+   THEME LAYER 1 — PRIMITIVES
+   The only file in the app permitted to contain a literal color value.
+
+   Primitives are named for what they *are* (acid-500, black-900), never for
+   what they are *used for*. Nothing outside `semantic.css` may reference them:
+   consumers that reach past the semantic layer re-couple themselves to a
+   specific hue and break the next theme.
+   ========================================================================== */
+
+:root {
+  /* --- neutrals: near-pure black ramp ------------------------------------ */
+  --black-1000: #000000;
+  --black-950: #030303;
+  --black-900: #090909;
+  --black-850: #0e0e0e;
+  --black-800: #171717;
+  --black-700: #1f1f1f;
+
+  --white-1000: #ffffff;
+  --white-050: #f4f4f2;
+  --white-400: #999999;
+  --white-500: #6f6f6f;
+
+  /* alpha whites — hairlines and washes read correctly over any surface */
+  --white-a04: rgba(255, 255, 255, 0.04);
+  --white-a08: rgba(255, 255, 255, 0.08);
+  --white-a10: rgba(255, 255, 255, 0.1);
+  --white-a22: rgba(255, 255, 255, 0.22);
+
+  /* alpha blacks — scrims and drop shadows */
+  --black-a40: rgba(0, 0, 0, 0.4);
+  --black-a60: rgba(0, 0, 0, 0.6);
+  --black-a90: rgba(0, 0, 0, 0.9);
+
+  /* --- chromatics -------------------------------------------------------- */
+  --acid-500: #e9ff2f;
+  --acid-400: #f3f901;
+  --acid-300: #f7ff7a;
+
+  --mint-500: #4ee6c0;
+  --red-500: #ff5c4d;
+  --amber-500: #ffb020;
+  --violet-500: #7657ff;
+  --sky-500: #5ec8ff;
+}

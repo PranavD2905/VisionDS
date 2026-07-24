@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AccountMenu } from '../auth/AccountMenu';
 import { useAuth } from '../auth/AuthProvider';
-import { cathodeEditor } from '../editorTheme';
+import { editorTheme } from '../editorTheme';
 import { DEFAULT_LANGUAGE, LANGUAGES, langById } from '../languages';
 import { readImportFromHash, type ImportProblem } from '../lib/import';
 import { runnerFor } from '../runner';
@@ -166,25 +166,25 @@ export function PastePage() {
 
   return (
     <div className="paste-page">
-      <header className="page-header">
-        <div className="app-bar">
-          <Link to="/" className="wordmark">
-            <span className="wordmark-mark" aria-hidden="true">
-              ▚
-            </span>
-            <span>
-              VISION<span className="wordmark-dim">DS</span>
-            </span>
+      <div className="app-bar frame">
+        <Link to="/" className="wordmark">
+          <span className="wordmark-mark" aria-hidden="true">
+            ▚
+          </span>
+          <span>
+            VISION<span className="wordmark-dim">DS</span>
+          </span>
+        </Link>
+        <span className="app-crumb">/ workbench</span>
+        <div className="app-bar-right">
+          <Link to="/product" className="app-bar-link">
+            Spec
           </Link>
-          <span className="app-crumb">/ workbench</span>
-          <div className="app-bar-right">
-            <Link to="/product" className="app-bar-link">
-              Spec
-            </Link>
-            <AccountMenu />
-          </div>
+          <AccountMenu />
         </div>
+      </div>
 
+      <header className="page-header frame">
         <p className="stamp">
           <span className="led" aria-hidden="true" />
           {langById(language).runsIn === 'server' ? 'Trace service · port 8787' : 'Local runtime · this tab'}
@@ -216,7 +216,7 @@ export function PastePage() {
         )}
       </header>
 
-      <section className="editor-section">
+      <section className="editor-section frame">
         <div className="editor-head">
           <h2>Your solution</h2>
           <div className="lang-tabs" role="tablist" aria-label="Language">
@@ -247,12 +247,12 @@ export function PastePage() {
           value={code}
           height="320px"
           theme="none"
-          extensions={[editorLang, ...cathodeEditor]}
+          extensions={[editorLang, ...editorTheme()]}
           onChange={setCode}
         />
       </section>
 
-      <section className="cases-section">
+      <section className="cases-section frame">
         <h2>Testcases</h2>
         <p className="hint">One argument per line, like LeetCode shows them (e.g. <code>[2,7,11,15]</code> then <code>9</code>).</p>
         {cases.map((c, i) => (
@@ -290,7 +290,7 @@ export function PastePage() {
         </button>
       </section>
 
-      <section className="run-section">
+      <section className="run-section frame">
         <button className="run-btn" onClick={onRun} disabled={busy}>
           {busy ? status ?? 'Running…' : 'Run & visualize'}
         </button>

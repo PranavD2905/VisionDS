@@ -111,24 +111,55 @@ pnpm workspaces monorepo:
   shown editable in the popup (so LeetCode DOM drift never blocks a handoff),
   then encoded as UTF-8-safe base64url into the site URL fragment
   (`/#import=…`) and opened in a new tab. The fragment never leaves the browser.
-- `apps/web` — React + Vite + TS. **Design system: "CATHODE-83"** — an
-  amber-phosphor CRT workstation. All type is monospace (IBM Plex Mono, with
-  Silkscreen for stamped micro-labels); structure is hairlines and box rules,
-  never shadow; Phosphor Amber `--accent` marks live state, green/red carry
-  verdicts. A fixed scanline+vignette overlay (`body::after`) puts every surface
-  behind glass. Tokens live in `src/styles.css` `:root`, so the whole app —
-  visualizer included — repaints from there. CodeMirror gets a matching
-  three-phosphor syntax theme in `src/editorTheme.ts` (`theme="none"` +
-  `cathodeEditor`), since CodeMirror builds its stylesheet outside the cascade.
-  **Routes:** `/` `LandingPage` (marketing: CRT hero replaying the failing
-  two-sum in CSS, how-it-runs, feature grid, creed, language table),
-  `/product` `ProductPage` (spec sheet: pipeline ASCII, the contract, language
-  matrix, structures, caps, privacy tiers, honest status), `/app` `PastePage`,
-  `/run` `RunPage`, plus the auth routes. Marketing pages share
-  `components/site/SiteChrome.tsx` (nav + footer) and `Reveal.tsx`
-  (IntersectionObserver scroll reveal); marketing CSS is `src/site.css`.
+- `apps/web` — React + Vite + TS. **Design system: "SPECIMEN"** — a catalogue
+  of live modules on near-pure black, in the spirit of a component library's
+  own site. Every region of every page is a framed specimen: hairline
+  white-alpha border, 4–6px radius, a stamped tag top-left, and a tabular
+  footer that indexes it (`KIND │ NNN │ TITLE │ STATUS`). Acid `--accent` marks
+  live state; mint/red carry verdicts. All type is monospace (IBM Plex Mono),
+  with Silkscreen for stamped micro-labels. Flat — no overlay between viewer
+  and data.
+
+  **The theme is layered, and the layering is load-bearing:**
+  1. `src/theme/palette.css` — primitives (`--acid-500`, `--white-a10`). **The
+     only file in the app allowed to contain a literal color.**
+  2. `src/theme/semantic.css` — role tokens (`--accent`, `--panel`,
+     `--verdict`-style names, `--editor-*`) mapped onto primitives. This is
+     the contract every consumer depends on; a new theme is a new mapping
+     block (there is a `[data-theme]` hook), with zero consumer edits.
+  3. `src/theme/tokens.ts` — the JS seam. CodeMirror compiles its own
+     stylesheet and Framer Motion needs concrete interpolable colors, so both
+     resolve *the same semantic tokens* through `token()` / `tokenAlpha()`
+     instead of hard-coding. `tokenAlpha` returns `rgba()` on purpose: custom
+     properties compute to an unresolved token stream, so a `color-mix()`
+     string reaches Framer Motion uninterpolable and the animation snaps.
+
+  Consumers (`styles.css`, `site.css`, every component) reference semantic
+  tokens only. A literal outside `palette.css` is a defect — it survives
+  rethemes. `editorTheme()` is a lazy memoized factory (tokens only resolve
+  once the stylesheet is in the document); pair it with `theme="none"`.
+
+  **Site structure** (`src/site/`) is composed, not monolithic:
+  `types.ts` (the `SpecimenSpec`/`DemoComponent` contracts), `Specimen.tsx`
+  (the frame — knows how to index and caption, never what it contains),
+  `demos/*` (one self-contained CSS-animated exhibit per file, none aware of
+  the frame), `demos/registry.ts` (id → component, so the frame never branches
+  on which demo it shows), and `content/*.ts` (catalogue data, no JSX). Adding
+  an exhibit = one file + one registry line; nothing that already works is
+  edited. Catalogue spans must tile the 3-column grid (2+1 │ 1+1+1 │ 3) or the
+  layout leaves holes.
+
+  **Routes:** `/` `LandingPage` (masthead + the six-specimen catalogue +
+  pipeline + creed + runtimes), `/product` `ProductPage` (spec sheet: pipeline
+  ASCII, the contract, language matrix, structures, caps, privacy tiers,
+  honest status), `/app` `PastePage`, `/run` `RunPage`, plus the auth routes.
+  Marketing pages share `components/site/SiteChrome.tsx` (nav + footer) and
+  `Reveal.tsx` (IntersectionObserver scroll reveal); marketing CSS is
+  `src/site.css`, which also defines the `.frame` the workbench reuses.
   The extension still hands off at `/#import=…`; `LandingPage` forwards that
-  fragment to `/app` untouched, so installed builds keep working.
+  fragment to `/app` untouched (on mount *and* on `hashchange`, since a
+  hash-only change is a same-document navigation), so installed builds keep
+  working.
   `PastePage` (CodeMirror 6, per-language starter code + a language selector) →
   `RunPage`: CodePanel (current-line highlight),
   Stage + `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips),
@@ -200,12 +231,15 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   and with injected Supabase config). **Not yet exercised against a live Supabase
   project** — needs a project + Google OAuth client provisioned (see
   `apps/web/.env.example`); the OAuth flows and RLS are untested end-to-end.
-- Done & verified (2026-07-25): **full UI rehaul to CATHODE-83** — new token
-  system + fonts, landing page at `/`, spec sheet at `/product`, workbench moved
-  to `/app` (auth + history redirects follow), restyled app shell and auth
-  pages, phosphor CodeMirror theme. Typecheck, prod build and all 12 unit tests
-  pass; landing/spec/workbench and a live Python run verified in the browser at
-  desktop and 420px.
+- Done & verified (2026-07-25): **UI rehaul → SPECIMEN**, on branch
+  `visionds-ui-overrides`. Layered theme (primitives → semantic → JS seam) with
+  every color literal confined to `theme/palette.css`; composed `src/site/`
+  catalogue (frame + demo registry + content); landing at `/`, spec sheet at
+  `/product`, workbench at `/app` in the same framed-module language. Fixed en
+  route: the value-flash in `stage/views.tsx` was hard-coded to the retired
+  Livewire blue, and the extension's hash handoff missed same-document hash
+  changes. Typecheck, prod build and all unit tests pass; landing, spec sheet,
+  workbench and a live Python run verified in the browser.
 - Not built yet: production sandbox for the trace service, Claude explainer
   option, graph/adjacency visualization. Known minor: bundling supabase-js grew
   the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.
