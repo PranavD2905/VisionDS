@@ -12,9 +12,7 @@ export function SiteNav({ active }: { active?: 'home' | 'product' }) {
     <header className="site-nav">
       <div className="site-nav-inner">
         <Link to="/" className="wordmark" aria-label="VisionDS home">
-          <span className="wordmark-mark" aria-hidden="true">
-            ▚
-          </span>
+          <img src="/logo.svg" className="wordmark-logo" alt="" aria-hidden="true" />
           <span>
             VISION<span className="wordmark-dim">DS</span>
           </span>
@@ -50,9 +48,7 @@ export function SiteFooter() {
       <div className="site-footer-inner">
         <div className="footer-brand">
           <span className="wordmark">
-            <span className="wordmark-mark" aria-hidden="true">
-              ▚
-            </span>
+            <img src="/logo.svg" className="wordmark-logo" alt="" aria-hidden="true" />
             <span>
               VISION<span className="wordmark-dim">DS</span>
             </span>

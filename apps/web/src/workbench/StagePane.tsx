@@ -33,9 +33,7 @@ export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
           <span className="pane-title">Stage</span>
         </header>
         <div className="stage-empty-state">
-          <div className="empty-mark" aria-hidden="true">
-            ▚
-          </div>
+          <img className="empty-mark" src="/logo.svg" alt="" aria-hidden="true" />
           <p className="empty-lead">Nothing recorded yet</p>
           <p className="empty-sub">
             Run your code and every structure it touches gets drawn here, step by step.

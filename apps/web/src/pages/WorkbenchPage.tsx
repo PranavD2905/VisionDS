@@ -122,10 +122,8 @@ export function WorkbenchPage() {
   return (
     <div className="workbench">
       <div className="app-bar frame">
-        <Link to="/" className="wordmark">
-          <span className="wordmark-mark" aria-hidden="true">
-            ▚
-          </span>
+        <Link to="/" className="wordmark" aria-label="VisionDS home">
+          <img src="/logo.svg" className="wordmark-logo" alt="" aria-hidden="true" />
           <span>
             VISION<span className="wordmark-dim">DS</span>
           </span>

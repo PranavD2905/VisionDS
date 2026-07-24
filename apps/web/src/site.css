@@ -95,7 +95,15 @@
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
-.wordmark-mark { color: var(--accent); font-size: 15px; line-height: 1; }
+/* the mark: a fixed square so the wordmark's baseline never shifts as the
+   image loads. Slightly larger than the cap height — the artwork is detailed
+   and disappears if it is set to match the type exactly. */
+.wordmark-logo {
+  width: 24px;
+  height: 24px;
+  display: block;
+  flex-shrink: 0;
+}
 .wordmark-dim { color: var(--muted); }
 
 .site-nav-links { display: flex; gap: var(--s-5); margin-left: auto; }

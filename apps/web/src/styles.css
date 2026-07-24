@@ -415,7 +415,12 @@ button:disabled { opacity: 0.45; cursor: default; }
   padding: var(--s-6);
   text-align: center;
 }
-.empty-mark { font-size: 30px; color: var(--accent); opacity: 0.5; margin-bottom: var(--s-2); }
+.empty-mark {
+  width: 56px;
+  height: 56px;
+  opacity: 0.35;
+  margin-bottom: var(--s-2);
+}
 .empty-lead { margin: 0; font-size: 14px; color: var(--text); }
 .empty-sub { margin: 0; font-size: 12.5px; color: var(--muted); max-width: 40ch; line-height: 1.7; }
 

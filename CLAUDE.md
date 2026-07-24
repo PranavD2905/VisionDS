@@ -120,6 +120,14 @@ pnpm workspaces monorepo:
   with Silkscreen for stamped micro-labels. Flat — no overlay between viewer
   and data.
 
+  **Brand mark**: `apps/web/public/logo.svg` — the olive iris/gem mark, used as
+  the favicon and beside the wordmark in the nav, workbench bar, footer and the
+  empty stage. It is a traced-raster source (711 paths): the supplied file was
+  processed to strip its opaque `#FCFDFB` background (it rendered as a white
+  box on dark), crop the viewBox to the mark's measured bounding box, and round
+  coordinates to 2dp — 408 KB → 264 KB (88 KB gzipped). Re-processing a new
+  export means redoing those three steps; it is not hand-authored SVG.
+
   **Two themes ship**: `specimen` (dark, default) and `daylight` (light),
   selected by `<html data-theme>`. An inline script in `index.html` stamps it
   before first paint from localStorage, else the OS preference — without that
