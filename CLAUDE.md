@@ -152,7 +152,21 @@ pnpm workspaces monorepo:
   **Routes:** `/` `LandingPage` (masthead + the six-specimen catalogue +
   pipeline + creed + runtimes), `/product` `ProductPage` (spec sheet: pipeline
   ASCII, the contract, language matrix, structures, caps, privacy tiers,
-  honest status), `/app` `PastePage`, `/run` `RunPage`, plus the auth routes.
+  honest status), `/app` `WorkbenchPage`, plus the auth routes. `/run`
+  redirects to `/app` — editing and visualization are **one screen**, not two.
+
+  **The workbench** (`src/workbench/`) is a two-pane split: `SourcePane`
+  (language, editor, testcases, run) and `StagePane` (verdict, diagrams,
+  narration, transport), with `useRun` holding the run flow and `WorkbenchPage`
+  owning only the source state. There is **one copy of your code on screen**:
+  the editor stays editable and marks the current step in place via
+  `editorActiveLine.ts` (a CodeMirror decoration, so it tracks real line
+  geometry). Editing after a run shows a "stale" note rather than pretending
+  the diagram still matches. Two layout rules matter: the editor must take a
+  *definite* height from its flex parent (a percentage height inside an
+  auto-height scroll parent puts CodeMirror's measure cycle into an infinite
+  loop that hangs the tab), and each pane scrolls internally so the page never
+  does.
   Marketing pages share `components/site/SiteChrome.tsx` (nav + footer) and
   `Reveal.tsx` (IntersectionObserver scroll reveal); marketing CSS is
   `src/site.css`, which also defines the `.frame` the workbench reuses.
@@ -160,11 +174,10 @@ pnpm workspaces monorepo:
   fragment to `/app` untouched (on mount *and* on `hashchange`, since a
   hash-only change is a same-document navigation), so installed builds keep
   working.
-  `PastePage` (CodeMirror 6, per-language starter code + a language selector) →
-  `RunPage`: CodePanel (current-line highlight),
-  Stage + `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips),
-  Transport (play/pause/speed/step/scrub — scrubbing renders `steps[cursor]`,
-  no re-execution), VerdictBanner ("Jump to failing step" seeks to
+  Shared playback components live in `src/components/`: Stage +
+  `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips), Transport
+  (play/pause/speed/step/scrub — scrubbing renders `steps[cursor]`, no
+  re-execution), VerdictBanner ("Jump to failing step" seeks to
   `divergenceStepIndex`), ExplainPanel. State: Zustand store (`store.ts`) —
   immutable traces + a cursor; the cursor is the only thing playback mutates.
   **Auth (optional, additive)** lives in `src/auth/`: `AuthProvider`/`useAuth`
@@ -231,6 +244,12 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   and with injected Supabase config). **Not yet exercised against a live Supabase
   project** — needs a project + Google OAuth client provisioned (see
   `apps/web/.env.example`); the OAuth flows and RLS are untested end-to-end.
+- Done & verified (2026-07-25): **editing + visualization merged onto one
+  screen** — `/app` is now a two-pane workbench, `PastePage`/`RunPage`/
+  `CodePanel` are gone, and the live editor doubles as the playback code panel.
+  Verified in the browser: run → verdict + diagrams, jump-to-failing-step moves
+  the editor highlight, stepping updates both panes, editing shows the stale
+  note, `/run` redirects.
 - Done & verified (2026-07-25): **UI rehaul → SPECIMEN**, on branch
   `visionds-ui-overrides`. Layered theme (primitives → semantic → JS seam) with
   every color literal confined to `theme/palette.css`; composed `src/site/`
