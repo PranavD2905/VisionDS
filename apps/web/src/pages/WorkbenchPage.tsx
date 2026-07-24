@@ -3,6 +3,7 @@ import { twoSumFailTrace, type TestCase } from '@visionds/trace-schema';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AccountMenu } from '../auth/AccountMenu';
+import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuth } from '../auth/AuthProvider';
 import { DEFAULT_LANGUAGE, langById } from '../languages';
 import { readImportFromHash, type ImportProblem } from '../lib/import';
@@ -147,6 +148,7 @@ export function WorkbenchPage() {
           <Link to="/product" className="app-bar-link">
             Spec
           </Link>
+          <ThemeToggle />
           <AccountMenu />
         </div>
       </div>

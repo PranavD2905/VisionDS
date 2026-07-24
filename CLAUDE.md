@@ -120,6 +120,17 @@ pnpm workspaces monorepo:
   with Silkscreen for stamped micro-labels. Flat — no overlay between viewer
   and data.
 
+  **Two themes ship**: `specimen` (dark, default) and `daylight` (light),
+  selected by `<html data-theme>`. An inline script in `index.html` stamps it
+  before first paint from localStorage, else the OS preference — without that
+  the page paints dark then flips. `ThemeToggle` + `theme/useTheme.ts` switch
+  it with a **View Transition**: the browser snapshots the page, the theme
+  swaps, and the new snapshot is clipped by a circle growing from the button to
+  the furthest corner. `transition.ready` **must** have a rejection handler —
+  it rejects whenever the browser skips the transition (hidden tab, a second
+  toggle mid-flight) and the theme still applies via `finished`. Unsupported
+  browsers and `prefers-reduced-motion` get an instant swap.
+
   **The theme is layered, and the layering is load-bearing:**
   1. `src/theme/palette.css` — primitives (`--acid-500`, `--white-a10`). **The
      only file in the app allowed to contain a literal color.**
@@ -134,10 +145,15 @@ pnpm workspaces monorepo:
      properties compute to an unresolved token stream, so a `color-mix()`
      string reaches Framer Motion uninterpolable and the animation snaps.
 
+  Anything that *caches* a resolved token must key that cache by theme —
+  `editorTheme(theme)` and the change-flash in `stage/views.tsx` both do, or
+  they keep the palette they were born with after a switch.
+
   Consumers (`styles.css`, `site.css`, every component) reference semantic
   tokens only. A literal outside `palette.css` is a defect — it survives
-  rethemes. `editorTheme()` is a lazy memoized factory (tokens only resolve
-  once the stylesheet is in the document); pair it with `theme="none"`.
+  rethemes. `editorTheme(theme)` is a lazy per-theme factory (tokens only
+  resolve once the stylesheet is in the document); pair it with
+  `theme="none"`.
 
   **Site structure** (`src/site/`) is composed, not monolithic:
   `types.ts` (the `SpecimenSpec`/`DemoComponent` contracts), `Specimen.tsx`
@@ -244,6 +260,14 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   and with injected Supabase config). **Not yet exercised against a live Supabase
   project** — needs a project + Google OAuth client provisioned (see
   `apps/web/.env.example`); the OAuth flows and RLS are untested end-to-end.
+- Done & verified (2026-07-25): **light mode (`daylight`) + circular wipe** —
+  a second semantic mapping block, no consumer changes. Light-mode `--accent`
+  darkens to deep chartreuse so it stays legible as ink, and `--text-inverse`
+  flips to white so it still reads on an accent fill. Verified light mode on
+  landing and workbench incl. a live run. **The wipe itself could not be seen
+  under automation**: the driven tab reports `document.hidden`, and Chrome
+  aborts view transitions in hidden tabs by design — that is how the missing
+  rejection handler was found.
 - Done & verified (2026-07-25): **editing + visualization merged onto one
   screen** — `/app` is now a two-pane workbench, `PastePage`/`RunPage`/
   `CodePanel` are gone, and the live editor doubles as the playback code panel.

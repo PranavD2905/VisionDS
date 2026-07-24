@@ -1,10 +1,11 @@
 import { Link, NavLink } from 'react-router-dom';
 import { AccountMenu } from '../../auth/AccountMenu';
+import { ThemeToggle } from '../ThemeToggle';
 
 /**
  * Marketing-surface chrome (landing + spec page). Deliberately thin: the nav is
  * a hairline rail of stamped labels, the footer is a terminal sign-off. The app
- * itself (PastePage/RunPage) keeps its own denser header.
+ * itself (the workbench) keeps its own denser header.
  */
 export function SiteNav({ active }: { active?: 'home' | 'product' }) {
   return (
@@ -32,6 +33,7 @@ export function SiteNav({ active }: { active?: 'home' | 'product' }) {
         </nav>
 
         <div className="site-nav-right">
+          <ThemeToggle />
           <AccountMenu />
           <Link to="/app" className="nav-cta">
             Run code <span aria-hidden="true">▸</span>

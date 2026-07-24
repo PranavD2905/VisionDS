@@ -3,10 +3,11 @@ import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import type { TestCase } from '@visionds/trace-schema';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { activeLineExtension, showActiveLine } from '../editorActiveLine';
 import { editorTheme } from '../editorTheme';
 import { LANGUAGES, langById } from '../languages';
+import { useTheme } from '../theme/useTheme';
 
 const LANG_MODE = { cpp, java, python } as const;
 
@@ -61,7 +62,17 @@ export function SourcePane({
     });
   }, [activeLine, activeLineIsException]);
 
-  const mode = (LANG_MODE[language as keyof typeof LANG_MODE] ?? python)();
+  // rebuilt when the language or the theme changes — CodeMirror bakes colors
+  // into its own stylesheet, so a retheme needs a fresh extension set
+  const { theme } = useTheme();
+  const extensions = useMemo(
+    () => [
+      (LANG_MODE[language as keyof typeof LANG_MODE] ?? python)(),
+      activeLineExtension,
+      ...editorTheme(theme),
+    ],
+    [language, theme],
+  );
   const updateCase = (i: number, patch: Partial<TestCase>) =>
     onCases((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
 
@@ -99,7 +110,7 @@ export function SourcePane({
           ref={editor}
           value={code}
           theme="none"
-          extensions={[mode, activeLineExtension, ...editorTheme()]}
+          extensions={extensions}
           onChange={onCode}
         />
       </div>

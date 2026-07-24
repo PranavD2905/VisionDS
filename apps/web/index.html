@@ -18,6 +18,21 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Stamp the theme before first paint: a stored choice wins, otherwise
+         follow the OS. Without this the page paints dark, then flips. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('visionds:theme');
+          var light =
+            stored === 'daylight' ||
+            (!stored && window.matchMedia('(prefers-color-scheme: light)').matches);
+          document.documentElement.dataset.theme = light ? 'daylight' : 'specimen';
+        } catch (e) {
+          document.documentElement.dataset.theme = 'specimen';
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

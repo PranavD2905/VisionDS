@@ -15,9 +15,9 @@ import { token, tokenAlpha } from './theme/tokens';
  * Built lazily and cached: the tokens only resolve once the stylesheet is in
  * the document, which is after module evaluation but before first render.
  */
-let cached: Extension[] | null = null;
+const cache = new Map<string, Extension[]>();
 
-function build(): Extension[] {
+function build(isDark: boolean): Extension[] {
   const bg = token('--editor-bg');
   const text = token('--editor-text');
   const accent = token('--accent');
@@ -57,7 +57,7 @@ function build(): Extension[] {
         color: text,
       },
     },
-    { dark: true },
+    { dark: isDark },
   );
 
   /* Three roles carry the syntax: accent for the language's own words, string
@@ -84,8 +84,19 @@ function build(): Extension[] {
   return [theme, syntaxHighlighting(highlight)];
 }
 
-/** Drop-in `extensions` entry — pair with `theme="none"` on the editor. */
-export function editorTheme(): Extension[] {
-  if (!cached) cached = build();
-  return cached;
+/**
+ * Drop-in `extensions` entry — pair with `theme="none"` on the editor.
+ *
+ * Keyed by theme name: the tokens resolve to different colors per theme, and
+ * CodeMirror bakes them into a stylesheet, so each theme needs its own build.
+ * Callers must pass the active theme and rebuild their `extensions` array when
+ * it changes, or the editor keeps the palette it was born with.
+ */
+export function editorTheme(theme: string): Extension[] {
+  let built = cache.get(theme);
+  if (!built) {
+    built = build(theme !== 'daylight');
+    cache.set(theme, built);
+  }
+  return built;
 }

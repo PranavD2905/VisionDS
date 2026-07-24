@@ -20,10 +20,15 @@ const drawEase = [0.16, 1, 0.3, 1] as const;
  * Cached because the stage re-renders on every step and the tokens are stable
  * for the lifetime of a theme.
  */
-let flashCache: [string, string] | null = null;
+const flashCache = new Map<string, [string, string]>();
 function flashColors(): [string, string] {
-  if (!flashCache) flashCache = [tokenAlpha('--accent', 0.4), tokenAlpha('--accent', 0)];
-  return flashCache;
+  const theme = document.documentElement.dataset.theme ?? 'specimen';
+  let pair = flashCache.get(theme);
+  if (!pair) {
+    pair = [tokenAlpha('--accent', 0.4), tokenAlpha('--accent', 0)];
+    flashCache.set(theme, pair);
+  }
+  return pair;
 }
 
 /**
