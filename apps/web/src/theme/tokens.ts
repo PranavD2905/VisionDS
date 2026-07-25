@@ -19,6 +19,7 @@ export type SemanticToken =
   | '--panel'
   | '--panel-2'
   | '--cell-bg'
+  | '--cell-bg-raised'
   | '--border'
   | '--border-strong'
   | '--text'

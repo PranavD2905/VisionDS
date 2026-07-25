@@ -199,7 +199,22 @@ pnpm workspaces monorepo:
   hash-only change is a same-document navigation), so installed builds keep
   working.
   Shared playback components live in `src/components/`: Stage +
-  `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips), Transport
+  `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips), Transport.
+  **Numeric arrays get a 3D stage** (`stage/Array3D.tsx`, react-three-fiber):
+  extruded blocks whose height encodes value, on a plinth, with cast shadows,
+  acid-tinted pointed blocks, cone pointer chips, and swap arcs. It is
+  lazy-loaded (three.js lives in its own ~236 kB gz chunk that never loads
+  until an eligible array is on stage) and gated — ≤24 finite numbers, WebGL
+  available, no `prefers-reduced-motion` — with the 2D `CellRail` as the
+  Suspense/error/ineligible fallback. Motion model: every animated quantity
+  (position, height, color, flash, lift) is `MathUtils.damp`ed toward a target
+  that is a pure function of `steps[cursor]`, so it is scrub-safe by
+  construction and needs no keyframes — the swap arc is lift ∝ distance still
+  to travel, on two lanes so passing blocks miss each other. Colors resolve
+  through `token()` only, re-resolved via a MutationObserver on
+  `<html data-theme>` (the memo is keyed by theme, per the caching rule);
+  element identity across steps comes from the shared `stage/slotIds.ts`
+  (extracted from views.tsx, used by both rails).
   (play/pause/speed/step/scrub — scrubbing renders `steps[cursor]`, no
   re-execution), VerdictBanner ("Jump to failing step" seeks to
   `divergenceStepIndex`), ExplainPanel. State: Zustand store (`store.ts`) —
@@ -291,8 +306,19 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   Livewire blue, and the extension's hash handoff missed same-document hash
   changes. Typecheck, prod build and all unit tests pass; landing, spec sheet,
   workbench and a live Python run verified in the browser.
+- Done & verified (2026-07-25): **3D array stage** on branch
+  `visionds-3d-stage` — react-three-fiber block scene for numeric arrays (see
+  apps/web notes above). Verified in the browser on a live bubble-sort run:
+  entrance rise, mid-run order after pass one, pointer chips + acid tint on
+  `i`/`p`, sorted staircase at the last step, and a live theme flip re-skinning
+  the whole scene (paper blocks / olive accent / visible shadows). Caveat
+  repeated from the wipe work: **the automated tab throttles
+  requestAnimationFrame** (window occluded), so animation smoothness cannot be
+  observed under automation — only settled states were verified; play it in a
+  real tab to judge motion. Typecheck, prod build and all unit tests pass.
 - Not built yet: production sandbox for the trace service, Claude explainer
-  option, graph/adjacency visualization. Known minor: bundling supabase-js grew
+  option, graph/adjacency visualization, 3D treatment for matrices and other
+  structure kinds (they keep the 2D views). Known minor: bundling supabase-js grew
   the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.
 
 ## Repo conventions
