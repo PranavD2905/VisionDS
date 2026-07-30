@@ -400,9 +400,17 @@ function Scene({ items, pointers }: { items: number[]; pointers: Chip[] }) {
   );
 }
 
-export default function Array3D({ items, pointers }: { items: number[]; pointers: Chip[] }) {
-  // width tracks the element count so short arrays don't swim in empty canvas
-  const width = Math.min(680, Math.max(300, 110 + items.length * 58));
+export default function Array3D({
+  items,
+  pointers,
+  width,
+}: {
+  items: number[];
+  pointers: Chip[];
+  /** Set by the caller (also used for the Suspense placeholder) so the frame
+   *  keeps its size when the lazy chunk swaps in. */
+  width: number;
+}) {
   return (
     <div className="array3d" style={{ width }}>
       <Canvas

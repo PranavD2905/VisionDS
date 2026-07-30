@@ -328,6 +328,10 @@ class Stage3DBoundary extends Component<
   }
 }
 
+/** Canvas width for n blocks — also sizes the loading placeholder, so the
+ *  frame doesn't resize when the chunk arrives. */
+const stage3dWidth = (n: number) => Math.min(680, Math.max(300, 110 + n * 58));
+
 const ArrayView: FC<ViewProps> = ({ snap, pointers }) => {
   const reduced = useReducedMotion();
   const items = Array.isArray(snap.value) ? snap.value : [];
@@ -347,8 +351,14 @@ const ArrayView: FC<ViewProps> = ({ snap, pointers }) => {
     <Frame name={snap.name} tag={`array · ${items.length}`} truncated={snap.truncated}>
       {use3d ? (
         <Stage3DBoundary fallback={rail}>
-          <Suspense fallback={rail}>
+          {/* While the three.js chunk loads, hold an empty stage-sized box —
+              flashing the 2D rail here reads as a glitch, and the entrance
+              rise plays the "something is coming" role once the chunk lands. */}
+          <Suspense
+            fallback={<div className="array3d" style={{ width: stage3dWidth(items.length) }} />}
+          >
             <Array3D
+              width={stage3dWidth(items.length)}
               items={items as number[]}
               pointers={pointers
                 .filter((p) => typeof p.value === 'number')

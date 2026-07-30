@@ -206,7 +206,8 @@ pnpm workspaces monorepo:
   lazy-loaded (three.js lives in its own ~236 kB gz chunk that never loads
   until an eligible array is on stage) and gated — ≤24 finite numbers, WebGL
   available, no `prefers-reduced-motion` — with the 2D `CellRail` as the
-  Suspense/error/ineligible fallback. Motion model: every animated quantity
+  error/ineligible fallback (the Suspense fallback is an empty stage-sized
+  box: flashing the rail while the chunk loads read as a glitch). Motion model: every animated quantity
   (position, height, color, flash, lift) is `MathUtils.damp`ed toward a target
   that is a pure function of `steps[cursor]`, so it is scrub-safe by
   construction and needs no keyframes — the swap arc is lift ∝ distance still
