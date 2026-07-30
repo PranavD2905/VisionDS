@@ -4,10 +4,12 @@ import { Component, Suspense, lazy, useRef, type FC, type ReactNode } from 'reac
 import { fmt } from '../../lib/format';
 import { tokenAlpha } from '../../theme/tokens';
 import { useSlotIds } from './slotIds';
+import { layoutTree, type TreeValue } from './treeLayout';
+import type { Stage3DProps } from './three/Stage3D';
 
 /** The WebGL stage ships in its own chunk; three.js never loads until an
- *  eligible array is actually on stage. */
-const Array3D = lazy(() => import('./Array3D'));
+ *  eligible structure is actually on stage. */
+const Stage3D = lazy(() => import('./three/Stage3D'));
 
 export interface ViewProps {
   snap: VarSnapshot;
@@ -328,52 +330,75 @@ class Stage3DBoundary extends Component<
   }
 }
 
-/** Canvas width for n blocks — also sizes the loading placeholder, so the
- *  frame doesn't resize when the chunk arrives. */
-const stage3dWidth = (n: number) => Math.min(680, Math.max(300, 110 + n * 58));
+/** JSON leaves render as labels; nested values have no single block form. */
+const isScalar = (v: JsonValue) =>
+  v === null || typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean';
+
+/** Pointer locals in the shape the 3D scenes take. */
+const toChips = (pointers: VarSnapshot[]) =>
+  pointers
+    .filter((p) => typeof p.value === 'number')
+    .map((p) => ({ name: p.name, index: p.value as number }));
+
+const clampW = (w: number) => Math.min(680, Math.max(300, w));
+
+/** Shared 3D eligibility: never against the viewer's wishes or their GPU. */
+function use3dBase(): boolean {
+  const reduced = useReducedMotion();
+  return !reduced && hasWebGL();
+}
+
+/**
+ * Renders the lazy 3D stage when eligible, else the 2D fallback. While the
+ * three.js chunk loads, holds an empty stage-sized box — flashing the 2D view
+ * reads as a glitch, and the entrance animation plays the "something is
+ * coming" role once the chunk lands. A crashed canvas degrades to 2D.
+ */
+function Maybe3D({
+  ok,
+  fallback,
+  spec,
+}: {
+  ok: boolean;
+  fallback: ReactNode;
+  spec: Stage3DProps;
+}) {
+  if (!ok) return <>{fallback}</>;
+  return (
+    <Stage3DBoundary fallback={fallback}>
+      <Suspense
+        fallback={<div className="array3d" style={{ width: spec.width, height: spec.height }} />}
+      >
+        <Stage3D {...spec} />
+      </Suspense>
+    </Stage3DBoundary>
+  );
+}
 
 const ArrayView: FC<ViewProps> = ({ snap, pointers }) => {
-  const reduced = useReducedMotion();
+  const base = use3dBase();
   const items = Array.isArray(snap.value) ? snap.value : [];
-  const rail = (
-    <CellRail name={snap.name} items={items} pointers={pointers} dense={items.length > 12} />
-  );
-  // The extruded-block stage only makes sense where height can encode value:
-  // finite numbers, few enough to stay readable. Everything else (strings,
-  // nested values, 25+ elements, reduced motion, no WebGL) keeps the rail.
-  const use3d =
-    !reduced &&
-    items.length > 0 &&
-    items.length <= 24 &&
-    items.every((v) => typeof v === 'number' && Number.isFinite(v)) &&
-    hasWebGL();
+  const n = items.length;
+  const rail = <CellRail name={snap.name} items={items} pointers={pointers} dense={n > 12} />;
   return (
-    <Frame name={snap.name} tag={`array · ${items.length}`} truncated={snap.truncated}>
-      {use3d ? (
-        <Stage3DBoundary fallback={rail}>
-          {/* While the three.js chunk loads, hold an empty stage-sized box —
-              flashing the 2D rail here reads as a glitch, and the entrance
-              rise plays the "something is coming" role once the chunk lands. */}
-          <Suspense
-            fallback={<div className="array3d" style={{ width: stage3dWidth(items.length) }} />}
-          >
-            <Array3D
-              width={stage3dWidth(items.length)}
-              items={items as number[]}
-              pointers={pointers
-                .filter((p) => typeof p.value === 'number')
-                .map((p) => ({ name: p.name, index: p.value as number }))}
-            />
-          </Suspense>
-        </Stage3DBoundary>
-      ) : (
-        rail
-      )}
+    <Frame name={snap.name} tag={`array · ${n}`} truncated={snap.truncated}>
+      <Maybe3D
+        ok={base && n >= 1 && n <= 24 && items.every(isScalar)}
+        fallback={rail}
+        spec={{
+          kind: 'array',
+          items,
+          pointers: toChips(pointers),
+          width: clampW(110 + n * 58),
+          height: 236,
+        }}
+      />
     </Frame>
   );
 };
 
 const StringView: FC<ViewProps> = ({ snap, pointers }) => {
+  const base = use3dBase();
   const s = typeof snap.value === 'string' ? snap.value : fmt(snap.value);
   // long prose with nobody indexing it reads better as one tile than 200 cells
   if (s.length > 24 && pointers.length === 0) {
@@ -385,52 +410,84 @@ const StringView: FC<ViewProps> = ({ snap, pointers }) => {
       </Frame>
     );
   }
+  const chars = [...s];
+  const n = chars.length;
   return (
     <Frame name={snap.name} tag={`string · ${s.length}`} truncated={snap.truncated}>
-      <CellRail name={snap.name} items={[...s]} pointers={pointers} dense={s.length > 12} raw />
+      <Maybe3D
+        ok={base && n >= 1 && n <= 24}
+        fallback={<CellRail name={snap.name} items={chars} pointers={pointers} dense={n > 12} raw />}
+        spec={{
+          kind: 'array',
+          items: chars,
+          raw: true,
+          pointers: toChips(pointers),
+          width: clampW(110 + n * 58),
+          height: 210,
+        }}
+      />
     </Frame>
   );
 };
 
 const MatrixView: FC<ViewProps> = ({ snap }) => {
+  const base = use3dBase();
   const rows = (Array.isArray(snap.value) ? snap.value : []).map((r) =>
     Array.isArray(r) ? r : [r],
   );
   const cols = Math.max(0, ...rows.map((r) => r.length));
   const delay = useMountStagger(0.035, 0.16, 20);
+  const grid = (
+    <div
+      className="matrix-grid"
+      style={{ gridTemplateColumns: `max-content repeat(${cols}, max-content)` }}
+    >
+      <div className="matrix-corner" />
+      {Array.from({ length: cols }, (_, c) => (
+        <div className="matrix-head" key={`c${c}`}>
+          {c}
+        </div>
+      ))}
+      {rows.map((row, r) => [
+        <div className="matrix-head" key={`r${r}`}>
+          {r}
+        </div>,
+        ...row.map((v, c) => (
+          // diagonal build wave — reads like the DP table filling itself in
+          <Cell key={`${r}:${c}`} value={v} delay={delay(r + c)} className="cell cell-sm" />
+        )),
+      ])}
+    </div>
+  );
+  const numeric =
+    rows.length >= 1 &&
+    rows.length <= 12 &&
+    cols >= 1 &&
+    cols <= 12 &&
+    rows.every((r) => r.every((v) => typeof v === 'number' && Number.isFinite(v)));
   return (
     <Frame name={snap.name} tag={`matrix · ${rows.length}×${cols}`} truncated={snap.truncated}>
-      <div
-        className="matrix-grid"
-        style={{ gridTemplateColumns: `max-content repeat(${cols}, max-content)` }}
-      >
-        <div className="matrix-corner" />
-        {Array.from({ length: cols }, (_, c) => (
-          <div className="matrix-head" key={`c${c}`}>
-            {c}
-          </div>
-        ))}
-        {rows.map((row, r) => [
-          <div className="matrix-head" key={`r${r}`}>
-            {r}
-          </div>,
-          ...row.map((v, c) => (
-            // diagonal build wave — reads like the DP table filling itself in
-            <Cell key={`${r}:${c}`} value={v} delay={delay(r + c)} className="cell cell-sm" />
-          )),
-        ])}
-      </div>
+      <Maybe3D
+        ok={base && numeric}
+        fallback={grid}
+        spec={{
+          kind: 'matrix',
+          rows: rows as number[][],
+          width: clampW(120 + cols * 62),
+          height: Math.min(360, 170 + rows.length * 26),
+        }}
+      />
     </Frame>
   );
 };
 
 const StackView: FC<ViewProps> = ({ snap, pointers }) => {
+  const base = use3dBase();
   const reduced = useReducedMotion();
   const items = Array.isArray(snap.value) ? snap.value : [];
   const delay = useMountStagger();
   const top = items.length - 1;
-  return (
-    <Frame name={snap.name} tag={`stack · ${items.length}`} truncated={snap.truncated} className="struct-stack">
+  const tower = (
       <div className="stack-col">
         <AnimatePresence mode="popLayout">
           {items
@@ -469,11 +526,26 @@ const StackView: FC<ViewProps> = ({ snap, pointers }) => {
         </AnimatePresence>
         {items.length === 0 && <div className="empty-slot">empty</div>}
       </div>
+  );
+  return (
+    <Frame name={snap.name} tag={`stack · ${items.length}`} truncated={snap.truncated} className="struct-stack">
+      <Maybe3D
+        ok={base && items.length >= 1 && items.length <= 16 && items.every(isScalar)}
+        fallback={tower}
+        spec={{
+          kind: 'stack',
+          items,
+          pointers: toChips(pointers),
+          width: 340,
+          height: Math.min(340, 170 + items.length * 24),
+        }}
+      />
     </Frame>
   );
 };
 
 const QueueView: FC<ViewProps> = ({ snap, pointers }) => {
+  const base3d = use3dBase();
   const reduced = useReducedMotion();
   const items = Array.isArray(snap.value) ? snap.value : [];
   const delay = useMountStagger();
@@ -488,15 +560,15 @@ const QueueView: FC<ViewProps> = ({ snap, pointers }) => {
     idRef.current.offset += d; // scrubbed backwards: fronts restored
   }
   idRef.current.prev = items;
-  const base = idRef.current.offset;
+  const keyBase = idRef.current.offset;
 
-  return (
-    <Frame name={snap.name} tag={`queue · ${items.length}`} truncated={snap.truncated} className="struct-queue">
+  const lane = (
+    <>
       <div className="queue-lane">
         <AnimatePresence mode="popLayout">
           {items.map((v, i) => (
             <motion.div
-              key={base + i}
+              key={keyBase + i}
               className="queue-col"
               layout="position"
               initial={reduced ? false : { opacity: 0, x: 26 }}
@@ -529,19 +601,34 @@ const QueueView: FC<ViewProps> = ({ snap, pointers }) => {
           <span className="queue-end">rear · in ←</span>
         </div>
       )}
+    </>
+  );
+  return (
+    <Frame name={snap.name} tag={`queue · ${items.length}`} truncated={snap.truncated} className="struct-queue">
+      <Maybe3D
+        ok={base3d && items.length >= 1 && items.length <= 16 && items.every(isScalar)}
+        fallback={lane}
+        spec={{
+          kind: 'queue',
+          items,
+          pointers: toChips(pointers),
+          width: clampW(160 + items.length * 62),
+          height: 210,
+        }}
+      />
     </Frame>
   );
 };
 
 const DictView: FC<ViewProps> = ({ snap }) => {
+  const base3d = use3dBase();
   const reduced = useReducedMotion();
   const entries =
     snap.value && typeof snap.value === 'object' && !Array.isArray(snap.value)
       ? Object.entries(snap.value)
       : [];
   const delay = useMountStagger();
-  return (
-    <Frame name={snap.name} tag={`map · ${entries.length}`} truncated={snap.truncated} className="struct-map">
+  const rows = (
       <div className="map-rows">
         <AnimatePresence mode="popLayout">
           {entries.map(([k, v], i) => (
@@ -578,16 +665,36 @@ const DictView: FC<ViewProps> = ({ snap }) => {
         </AnimatePresence>
         {entries.length === 0 && <div className="empty-slot">empty</div>}
       </div>
+  );
+  const dictCols = Math.max(1, Math.min(6, entries.length));
+  const dictRows = Math.max(1, Math.ceil(entries.length / dictCols));
+  return (
+    <Frame name={snap.name} tag={`map · ${entries.length}`} truncated={snap.truncated} className="struct-map">
+      <Maybe3D
+        ok={
+          base3d &&
+          entries.length >= 1 &&
+          entries.length <= 18 &&
+          entries.every(([, v]) => isScalar(v))
+        }
+        fallback={rows}
+        spec={{
+          kind: 'dict',
+          entries,
+          width: clampW(140 + dictCols * 100),
+          height: Math.min(360, 220 + (dictRows - 1) * 70),
+        }}
+      />
     </Frame>
   );
 };
 
 const SetView: FC<ViewProps> = ({ snap }) => {
+  const base3d = use3dBase();
   const reduced = useReducedMotion();
   const items = Array.isArray(snap.value) ? snap.value : [];
   const delay = useMountStagger();
-  return (
-    <Frame name={snap.name} tag={`set · ${items.length}`} truncated={snap.truncated} className="struct-set">
+  const chipRow = (
       <div className="chip-row">
         <AnimatePresence mode="popLayout">
           {items.map((v, i) => (
@@ -610,6 +717,21 @@ const SetView: FC<ViewProps> = ({ snap }) => {
         </AnimatePresence>
         {items.length === 0 && <div className="empty-slot">empty</div>}
       </div>
+  );
+  const rings =
+    items.length <= 1 ? 0 : Math.ceil((-3 + Math.sqrt(9 + 12 * (items.length - 1))) / 6);
+  return (
+    <Frame name={snap.name} tag={`set · ${items.length}`} truncated={snap.truncated} className="struct-set">
+      <Maybe3D
+        ok={base3d && items.length >= 1 && items.length <= 20 && items.every(isScalar)}
+        fallback={chipRow}
+        spec={{
+          kind: 'set',
+          items,
+          width: clampW(300 + rings * 90),
+          height: Math.min(330, 230 + rings * 40),
+        }}
+      />
     </Frame>
   );
 };
@@ -636,13 +758,14 @@ interface LinkedListValue {
 }
 
 const LinkedListView: FC<ViewProps> = ({ snap }) => {
+  const base3d = use3dBase();
   const reduced = useReducedMotion();
   const v = (snap.value ?? {}) as LinkedListValue;
   const vals = Array.isArray(v.vals) ? v.vals : [];
   const cyclesTo = typeof v.cyclesTo === 'number' ? v.cyclesTo : null;
   const delay = useMountStagger();
-  return (
-    <Frame name={snap.name} tag={`list · ${vals.length}`} truncated={snap.truncated} className="struct-list">
+  const chain = (
+    <>
       <div className="ll-row">
         <AnimatePresence mode="popLayout">
           {vals.map((val, i) => (
@@ -675,68 +798,45 @@ const LinkedListView: FC<ViewProps> = ({ snap }) => {
       {cyclesTo !== null && (
         <div className="ll-cycle">↺ tail links back to node #{cyclesTo}</div>
       )}
+    </>
+  );
+  return (
+    <Frame name={snap.name} tag={`list · ${vals.length}`} truncated={snap.truncated} className="struct-list">
+      <Maybe3D
+        ok={base3d && vals.length >= 1 && vals.length <= 12 && vals.every(isScalar)}
+        fallback={chain}
+        spec={{
+          kind: 'linkedlist',
+          vals,
+          cyclesTo,
+          width: clampW(140 + vals.length * 104),
+          height: cyclesTo !== null ? 240 : 195,
+        }}
+      />
     </Frame>
   );
 };
-
-interface TreeValue {
-  val: JsonValue;
-  left: TreeValue | null;
-  right: TreeValue | null;
-}
-interface TreeNodeLayout {
-  id: number;
-  val: JsonValue;
-  col: number;
-  depth: number;
-}
-interface TreeEdge {
-  from: number;
-  to: number;
-}
-
-/** In-order column assignment (classic non-overlapping binary layout). */
-function layoutTree(root: TreeValue | null) {
-  const nodes: TreeNodeLayout[] = [];
-  const edges: TreeEdge[] = [];
-  let col = 0;
-  let id = 0;
-  let maxDepth = 0;
-  const visit = (node: TreeValue | null, depth: number): number | null => {
-    if (!node || typeof node !== 'object') return null;
-    const leftId = visit(node.left, depth + 1);
-    const myId = id++;
-    nodes.push({ id: myId, val: node.val, col: col++, depth });
-    maxDepth = Math.max(maxDepth, depth);
-    if (leftId !== null) edges.push({ from: myId, to: leftId });
-    const rightId = visit(node.right, depth + 1);
-    if (rightId !== null) edges.push({ from: myId, to: rightId });
-    return myId;
-  };
-  visit(root, 0);
-  return { nodes, edges, cols: col, depth: maxDepth };
-}
 
 const COL_W = 56;
 const ROW_H = 66;
 const NODE = 40;
 
 const TreeView: FC<ViewProps> = ({ snap }) => {
+  const base3d = use3dBase();
   const reduced = useReducedMotion();
   const root = (snap.value ?? null) as TreeValue | null;
   const { nodes, edges, cols, depth } = layoutTree(root);
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const width = Math.max(cols, 1) * COL_W;
   const height = (depth + 1) * ROW_H;
-  const cx = (n: TreeNodeLayout) => n.col * COL_W + COL_W / 2;
-  const cy = (n: TreeNodeLayout) => n.depth * ROW_H + NODE / 2 + 4;
+  const cx = (n: { col: number }) => n.col * COL_W + COL_W / 2;
+  const cy = (n: { depth: number }) => n.depth * ROW_H + NODE / 2 + 4;
   const delay = useMountStagger(0.045, 0.16, 24);
 
-  return (
-    <Frame name={snap.name} tag={`tree · ${nodes.length}`} truncated={snap.truncated} className="struct-tree">
-      {nodes.length === 0 ? (
-        <div className="empty-slot">null</div>
-      ) : (
+  const drawn =
+    nodes.length === 0 ? (
+      <div className="empty-slot">null</div>
+    ) : (
         <div className="tree-canvas" style={{ width, height }}>
           <svg className="tree-edges" width={width} height={height} aria-hidden="true">
             {edges.map((e) => {
@@ -770,7 +870,20 @@ const TreeView: FC<ViewProps> = ({ snap }) => {
             </motion.div>
           ))}
         </div>
-      )}
+      );
+
+  return (
+    <Frame name={snap.name} tag={`tree · ${nodes.length}`} truncated={snap.truncated} className="struct-tree">
+      <Maybe3D
+        ok={base3d && nodes.length >= 1 && nodes.length <= 31}
+        fallback={drawn}
+        spec={{
+          kind: 'tree',
+          root,
+          width: clampW(140 + cols * 56),
+          height: Math.min(360, Math.max(220, 150 + (depth + 1) * 66)),
+        }}
+      />
     </Frame>
   );
 };

@@ -1,53 +1,43 @@
 /**
- * ARRAY3D — the WebGL stage for numeric arrays.
+ * STAGE3D KIT — shared machinery for every 3D structure scene.
  *
- * Lazy-loaded (three.js lives in this chunk only) and rendered inside the same
- * SPECIMEN `Frame` as the 2D rail. Blocks are extruded to their value: taller
- * block = bigger number, the visual grammar of every sorting explainer.
- *
- * Motion model: every animatable quantity is exponentially damped toward a
- * target that is a pure function of `steps[cursor]` (position, height, color,
- * flash). That keeps the scene scrub-safe by construction — a jump to any step
- * just retargets the damps mid-flight, exactly like the 2D springs. The swap
- * arc needs no keyframes: a block's lift is proportional to how far it still
- * has to travel, so it rises the instant its slot changes and settles as it
- * arrives; rightward movers ride a higher lane than leftward movers so
- * swapping blocks pass instead of merging.
+ * Lives inside the lazy three.js chunk. All scenes share one motion model:
+ * every animatable quantity is `MathUtils.damp`ed toward a target that is a
+ * pure function of the current step's snapshot, so every scene is scrub-safe
+ * by construction — a jump retargets mid-flight, exactly like the 2D springs.
  *
  * Colors resolve through the semantic token seam (`token()`), never literals,
- * and re-resolve when `<html data-theme>` changes — the color memo is keyed by
- * theme, per the theme-layer rule that caches of resolved tokens must be.
+ * and re-resolve when `<html data-theme>` changes; the memo is keyed by theme,
+ * per the theme-layer caching rule.
  */
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as THREE from 'three';
-import { fmt } from '../../lib/format';
-import { token, type SemanticToken } from '../../theme/tokens';
-import { useSlotIds } from './slotIds';
+import { token, type SemanticToken } from '../../../theme/tokens';
 
-export interface Chip {
-  name: string;
-  index: number;
-}
+export const damp = THREE.MathUtils.damp;
 
-const SP = 1.18; // slot pitch
-const H_MIN = 0.6;
-const H_MAX = 2.3;
-const damp = THREE.MathUtils.damp;
+/* ------------------------------------------------------------- geometry -- */
 
-const xFor = (i: number, n: number) => (i - (n - 1) / 2) * SP;
+/** Unit box with its origin on the floor, so `scale.y` extrudes upward. */
+export const unitBox = new THREE.BoxGeometry(1, 1, 1);
+unitBox.translate(0, 0.5, 0);
+export const unitBoxEdges = new THREE.EdgesGeometry(unitBox);
 
-/* Shared geometry, origin on the floor so `scale.y` extrudes upward. */
-const blockGeo = new THREE.BoxGeometry(0.94, 1, 0.94);
-blockGeo.translate(0, 0.5, 0);
-const blockEdges = new THREE.EdgesGeometry(blockGeo);
-const floorGeo = new THREE.BoxGeometry(1, 1, 1);
-const floorEdges = new THREE.EdgesGeometry(floorGeo);
+/** Six-sided gem for set members, same floor-origin convention; rotated so a
+ *  flat face (not a vertex) fronts the camera and can carry the label. */
+export const hexGem = new THREE.CylinderGeometry(0.55, 0.55, 1, 6);
+hexGem.rotateY(Math.PI / 6);
+hexGem.translate(0, 0.5, 0);
+export const hexGemEdges = new THREE.EdgesGeometry(hexGem);
+
+export const plainBox = new THREE.BoxGeometry(1, 1, 1);
+export const plainBoxEdges = new THREE.EdgesGeometry(plainBox);
 
 /* ---------------------------------------------------------------- theme -- */
 
 /** Re-render when `<html data-theme>` flips, so materials re-resolve tokens. */
-function useThemeName(): string {
+export function useThemeName(): string {
   const [theme, setTheme] = useState(
     () => document.documentElement.dataset.theme ?? 'specimen',
   );
@@ -77,10 +67,12 @@ function cssRgba(css: string): [number, number, number, number] {
   return [nums[0] ?? 128, nums[1] ?? 128, nums[2] ?? 128, nums[3] ?? 1];
 }
 
-interface StageColors {
+export interface StageColors {
   base: THREE.Color;
   accent: THREE.Color;
   warn: THREE.Color;
+  pass: THREE.Color;
+  ai: THREE.Color;
   floor: THREE.Color;
   edge: THREE.Color;
   edgeOpacity: number;
@@ -99,6 +91,8 @@ function resolveColors(): StageColors {
     base: col(chan('--cell-bg-raised')),
     accent: col(chan('--accent')),
     warn: col(chan('--warn')),
+    pass: col(chan('--pass')),
+    ai: col(chan('--ai')),
     floor: col(chan('--panel-2')),
     edge: col(edge),
     edgeOpacity: edge[3],
@@ -107,6 +101,11 @@ function resolveColors(): StageColors {
     mutedCss: token('--muted', '#888888'),
     accentCss: token('--accent', '#e9ff2f'),
   };
+}
+
+export function useStageColors(): StageColors {
+  const theme = useThemeName();
+  return useMemo(resolveColors, [theme]);
 }
 
 /* --------------------------------------------------------------- labels -- */
@@ -140,7 +139,7 @@ function makeLabel(text: string, color: string, bg?: string) {
 }
 
 /** A crisp text plate (canvas texture); re-bakes when text/colors change. */
-function Label({
+export function Label({
   text,
   color,
   bg,
@@ -169,70 +168,92 @@ function Label({
   );
 }
 
-/* --------------------------------------------------------------- blocks -- */
+/* ---------------------------------------------------------------- block -- */
 
-function Block({
-  value,
-  x,
+/**
+ * The universal animated unit: a floor-origin block (or gem) that damps
+ * toward `target`, extrudes to height `h`, flashes when its label changes,
+ * tints accent while pointed and amber while travelling, and rides an arc —
+ * lift proportional to planar distance still to travel — whenever it moves,
+ * so reorders read as physical hops. `born` is where it enters from (above
+ * for drops, beside for enqueues); omitted, it rises out of the floor.
+ */
+export function Block3D({
+  target,
+  born,
   h,
-  dir,
-  pointed,
-  delay,
+  size = [0.94, 0.94],
+  gem = false,
+  label,
+  labelSize = 0.4,
+  pointed = false,
+  dir = 0,
+  delay = 0,
   colors,
 }: {
-  value: number;
-  x: number;
+  target: [number, number, number];
+  born?: [number, number, number];
   h: number;
-  dir: number;
-  pointed: boolean;
-  delay: number;
+  size?: [number, number];
+  gem?: boolean;
+  label: string;
+  labelSize?: number;
+  pointed?: boolean;
+  /** travel direction hint: rightward movers ride the higher lane */
+  dir?: number;
+  delay?: number;
   colors: StageColors;
 }) {
   const group = useRef<THREE.Group>(null!);
   const body = useRef<THREE.Mesh>(null!);
   const mat = useRef<THREE.MeshStandardMaterial>(null!);
   const plate = useRef<THREE.Group>(null!);
-  const s = useRef({ born: false, elapsed: 0, dir: 0, flash: 0, prev: value });
+  const s = useRef({ bornYet: false, elapsed: 0, lastDir: 1, flash: 0, prev: label });
 
-  // render-time event detection (idempotent, like the 2D rail's slot refs)
-  if (value !== s.current.prev) {
+  if (label !== s.current.prev) {
     s.current.flash = 1;
-    s.current.prev = value;
+    s.current.prev = label;
   }
-  if (dir !== 0) s.current.dir = dir;
+  if (dir !== 0) s.current.lastDir = dir;
+
+  const [tx, ty, tz] = target;
 
   useFrame((_, dt) => {
     const st = s.current;
     const g = group.current;
-    if (!st.born) {
-      st.born = true;
-      g.position.x = x; // no glide in from origin on mount
-      body.current.scale.y = 0.001; // rise out of the floor instead
-      plate.current.position.y = 0.22; // …and the value plate rides up with it
+    if (!st.bornYet) {
+      st.bornYet = true;
+      if (born) g.position.set(born[0], born[1], born[2]);
+      else g.position.set(tx, ty, tz); // rise out of the floor in place
+      body.current.scale.y = 0.001;
+      plate.current.position.y = 0.2;
     }
     st.elapsed += dt;
     if (st.elapsed < delay) return; // entrance stagger
 
-    g.position.x = damp(g.position.x, x, 7, dt);
-    const dx = Math.abs(g.position.x - x);
-    // the swap arc: lift ∝ distance still to travel; two lanes so passers miss
-    const lift = dx > 0.02 ? Math.min(1, dx / SP) * (st.dir >= 0 ? 1.25 : 0.62) : 0;
-    g.position.y = damp(g.position.y, lift, 9, dt);
+    g.position.x = damp(g.position.x, tx, 7, dt);
+    g.position.z = damp(g.position.z, tz, 7, dt);
+    const planar = Math.abs(g.position.x - tx) + Math.abs(g.position.z - tz);
+    const lift =
+      planar > 0.02 ? Math.min(1, planar / 1.2) * (st.lastDir >= 0 ? 1.25 : 0.62) : 0;
+    g.position.y = damp(g.position.y, ty + lift, 9, dt);
 
+    body.current.scale.x = size[0];
+    body.current.scale.z = size[1];
     const sy = damp(body.current.scale.y, h, 8, dt);
     body.current.scale.y = sy;
-    plate.current.position.y = Math.max(0.22, sy * 0.5);
+    plate.current.position.y = Math.max(0.2, sy * 0.5);
 
-    const moving = dx > 0.12;
-    const target = pointed ? colors.accent : moving ? colors.warn : colors.base;
-    mat.current.color.lerp(target, 1 - Math.exp(-9 * dt));
+    const moving = planar > 0.12;
+    const tint = pointed ? colors.accent : moving ? colors.warn : colors.base;
+    mat.current.color.lerp(tint, 1 - Math.exp(-9 * dt));
     st.flash = damp(st.flash, 0, 5, dt);
     mat.current.emissiveIntensity = st.flash * 0.85 + (pointed ? 0.3 : 0);
   });
 
   return (
     <group ref={group}>
-      <mesh ref={body} geometry={blockGeo} castShadow dispose={null}>
+      <mesh ref={body} geometry={gem ? hexGem : unitBox} castShadow dispose={null}>
         <meshStandardMaterial
           ref={mat}
           color={colors.base}
@@ -241,7 +262,7 @@ function Block({
           roughness={0.55}
           metalness={0.08}
         />
-        <lineSegments geometry={blockEdges} dispose={null}>
+        <lineSegments geometry={gem ? hexGemEdges : unitBoxEdges} dispose={null}>
           <lineBasicMaterial
             color={colors.edge}
             transparent
@@ -250,13 +271,14 @@ function Block({
           />
         </lineSegments>
       </mesh>
-      {/* value plate rides the front face, unstretched by the height morph */}
-      <group ref={plate} position={[0, 0.22, 0.478]}>
+      {/* value plate rides the front face, unstretched by the height morph;
+          a gem's flat face sits at r·cos30°, past the box convention */}
+      <group ref={plate} position={[0, 0.2, gem ? 0.51 : size[1] * 0.5 + 0.038]}>
         <Label
-          text={fmt(value)}
+          text={label}
           color={pointed ? colors.textInverseCss : colors.textCss}
-          size={0.4}
-          maxW={0.82}
+          size={labelSize}
+          maxW={size[0] * 0.9}
         />
       </group>
     </group>
@@ -265,31 +287,32 @@ function Block({
 
 /* ---------------------------------------------------------------- chips -- */
 
-function PointerChip({
+/** Floating pointer marker: acid cone + name plate, damped to its target. */
+export function PointerChip3D({
   name,
-  index,
-  level,
-  n,
-  heights,
+  x,
+  y,
+  z = 0,
   colors,
-}: Chip & { level: number; n: number; heights: number[]; colors: StageColors }) {
+}: {
+  name: string;
+  x: number;
+  y: number;
+  z?: number;
+  colors: StageColors;
+}) {
   const group = useRef<THREE.Group>(null!);
   const born = useRef(false);
-  const clamped = Math.max(-1, Math.min(n, index));
-  const x = xFor(clamped, n);
-  const overBlock = clamped >= 0 && clamped < n ? heights[clamped]! : 0.55;
-  const y = overBlock + 0.06 + level * 0.62;
-
   useFrame((_, dt) => {
     const g = group.current;
     if (!born.current) {
       born.current = true;
-      g.position.set(x, y + 0.9, 0); // drop in from above
+      g.position.set(x, y + 0.9, z); // drop in from above
     }
     g.position.x = damp(g.position.x, x, 8, dt);
     g.position.y = damp(g.position.y, y, 8, dt);
+    g.position.z = damp(g.position.z, z, 8, dt);
   });
-
   return (
     <group ref={group}>
       <mesh rotation-x={Math.PI} position={[0, 0.18, 0]}>
@@ -309,25 +332,34 @@ function PointerChip({
   );
 }
 
-/* ---------------------------------------------------------------- floor -- */
+/* --------------------------------------------------------------- plinth -- */
 
-function Floor({ n, colors }: { n: number; colors: StageColors }) {
+/** The pedestal everything stands on; its footprint damps as data grows. */
+export function Plinth({
+  w,
+  d = 1.7,
+  colors,
+}: {
+  w: number;
+  d?: number;
+  colors: StageColors;
+}) {
   const ref = useRef<THREE.Mesh>(null!);
-  const targetW = n * SP + 0.9;
   useFrame((_, dt) => {
-    ref.current.scale.x = damp(ref.current.scale.x, targetW, 7, dt);
+    ref.current.scale.x = damp(ref.current.scale.x, w, 7, dt);
+    ref.current.scale.z = damp(ref.current.scale.z, d, 7, dt);
   });
   return (
     <mesh
       ref={ref}
-      geometry={floorGeo}
+      geometry={plainBox}
       position={[0, -0.09, 0]}
-      scale={[0.001, 0.17, 1.7]}
+      scale={[0.001, 0.17, d]}
       receiveShadow
       dispose={null}
     >
       <meshStandardMaterial color={colors.floor} roughness={0.9} metalness={0} />
-      <lineSegments geometry={floorEdges} dispose={null}>
+      <lineSegments geometry={plainBoxEdges} dispose={null}>
         <lineBasicMaterial
           color={colors.edge}
           transparent
@@ -339,87 +371,31 @@ function Floor({ n, colors }: { n: number; colors: StageColors }) {
   );
 }
 
-/* ---------------------------------------------------------------- scene -- */
+/* --------------------------------------------------------------- canvas -- */
 
-function Scene({ items, pointers }: { items: number[]; pointers: Chip[] }) {
-  const theme = useThemeName();
-  const colors = useMemo(resolveColors, [theme]);
-  const { ids, dir } = useSlotIds(items);
-  const n = items.length;
-  const { viewport } = useThree();
-
-  let min = Infinity;
-  let max = -Infinity;
-  for (const v of items) {
-    if (v < min) min = v;
-    if (v > max) max = v;
-  }
-  const heights = items.map((v) =>
-    max === min ? 1.15 : H_MIN + ((v - min) / (max - min)) * (H_MAX - H_MIN),
-  );
-
-  const pointedAt = new Set(pointers.map((p) => p.index));
-  // stack chips that share an index instead of overlapping them
-  const seen = new Map<number, number>();
-  const chips = pointers.map((p) => {
-    const level = seen.get(p.index) ?? 0;
-    seen.set(p.index, level + 1);
-    return { ...p, level };
-  });
-
-  const scale = Math.min(
-    1.2,
-    (viewport.width * 0.92) / (n * SP + 1.7),
-    (viewport.height * 0.98) / 4.3,
-  );
-
-  return (
-    <group scale={scale} position={[0, -0.45 * scale, 0]}>
-      <Floor n={n} colors={colors} />
-      {items.map((v, i) => (
-        <Block
-          key={ids[i]}
-          value={v}
-          x={xFor(i, n)}
-          h={heights[i]!}
-          dir={dir[i]!}
-          pointed={pointedAt.has(i)}
-          delay={i * 0.045}
-          colors={colors}
-        />
-      ))}
-      {items.map((_, i) => (
-        <group key={`ix-${i}`} position={[xFor(i, n), 0.012, 0.66]} rotation-x={-Math.PI / 2}>
-          <Label text={String(i)} color={colors.mutedCss} size={0.24} />
-        </group>
-      ))}
-      {chips.map((c) => (
-        <PointerChip key={c.name} {...c} n={n} heights={heights} colors={colors} />
-      ))}
-    </group>
-  );
-}
-
-export default function Array3D({
-  items,
-  pointers,
+/** One canvas per structure: lights, shadows, tilted camera, alpha bg. */
+export function StageCanvas({
   width,
+  height,
+  camera = [0, 4.4, 10.4],
+  look = [0, 0.9, 0],
+  children,
 }: {
-  items: number[];
-  pointers: Chip[];
-  /** Set by the caller (also used for the Suspense placeholder) so the frame
-   *  keeps its size when the lazy chunk swaps in. */
   width: number;
+  height: number;
+  camera?: [number, number, number];
+  look?: [number, number, number];
+  children: ReactNode;
 }) {
   return (
-    <div className="array3d" style={{ width }}>
+    <div className="array3d" style={{ width, height }}>
       <Canvas
         shadows
         flat
         dpr={[1, 2]}
         gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
-        camera={{ position: [0, 4.4, 10.4], fov: 30, near: 0.1, far: 80 }}
-        onCreated={({ camera }) => camera.lookAt(0, 0.9, 0)}
+        camera={{ position: camera, fov: 30, near: 0.1, far: 80 }}
+        onCreated={({ camera: cam }) => cam.lookAt(look[0], look[1], look[2])}
       >
         <ambientLight intensity={0.9} />
         <directionalLight
@@ -433,8 +409,33 @@ export default function Array3D({
           shadow-camera-bottom={-10}
         />
         <directionalLight position={[-6, 4, -5]} intensity={0.5} />
-        <Scene items={items} pointers={pointers} />
+        {children}
       </Canvas>
     </div>
   );
+}
+
+/* -------------------------------------------------------------- helpers -- */
+
+/** Map values to extrusion heights; uniform when non-numeric or constant. */
+export function normHeights(
+  values: unknown[],
+  hMin = 0.6,
+  hMax = 2.3,
+  uniform = 1.0,
+): number[] {
+  const nums = values.filter(
+    (v): v is number => typeof v === 'number' && Number.isFinite(v),
+  );
+  if (nums.length !== values.length || values.length === 0) {
+    return values.map(() => uniform);
+  }
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of nums) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  if (max === min) return values.map(() => (hMin + hMax) / 2);
+  return nums.map((v) => hMin + ((v - min) / (max - min)) * (hMax - hMin));
 }

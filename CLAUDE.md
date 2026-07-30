@@ -200,22 +200,33 @@ pnpm workspaces monorepo:
   working.
   Shared playback components live in `src/components/`: Stage +
   `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips), Transport.
-  **Numeric arrays get a 3D stage** (`stage/Array3D.tsx`, react-three-fiber):
-  extruded blocks whose height encodes value, on a plinth, with cast shadows,
-  acid-tinted pointed blocks, cone pointer chips, and swap arcs. It is
-  lazy-loaded (three.js lives in its own ~236 kB gz chunk that never loads
-  until an eligible array is on stage) and gated — ≤24 finite numbers, WebGL
-  available, no `prefers-reduced-motion` — with the 2D `CellRail` as the
-  error/ineligible fallback (the Suspense fallback is an empty stage-sized
-  box: flashing the rail while the chunk loads read as a glitch). Motion model: every animated quantity
-  (position, height, color, flash, lift) is `MathUtils.damp`ed toward a target
-  that is a pure function of `steps[cursor]`, so it is scrub-safe by
-  construction and needs no keyframes — the swap arc is lift ∝ distance still
-  to travel, on two lanes so passing blocks miss each other. Colors resolve
-  through `token()` only, re-resolved via a MutationObserver on
+  **Every structure kind has a 3D scene** (`stage/three/`, react-three-fiber),
+  one metaphor per kind: array/string = block rail (height encodes numeric
+  value, uniform tiles otherwise; swap arcs on two lanes so passing blocks
+  miss each other), matrix = height-field terrain (DP tables assemble as a
+  diagonal wave), stack = tower (pushes drop in from above, `top` tag rides
+  the summit), queue = conveyor (enter rear, whole line glides forward on
+  dequeue), dict = keyed landing pads (value block drops onto its key's pad),
+  set = honeycomb of hex gems (membership, not order), linked list = chain
+  with arrow struts (+ arced cycle tube), tree = hanging mobile of orbs.
+  Scalars stay 2D. Layout: `three/kit.tsx` is the shared machinery (canvas
+  rig, damp helpers, `Block3D`, labels, chips, plinth, theme colors);
+  `linear/field/keyed/graph.tsx` hold the scenes; `three/Stage3D.tsx` is the
+  kind→scene registry and the single lazy entry — three.js lives in one
+  ~239 kB gz chunk that never loads until an eligible structure is on stage.
+  Gating lives in views.tsx (`Maybe3D` + per-kind size/scalar caps, WebGL, no
+  `prefers-reduced-motion`), each 2D view remaining the error/ineligible
+  fallback (the Suspense fallback is an empty stage-sized box: flashing the
+  2D view while the chunk loads read as a glitch). Motion model: every
+  animated quantity (position, height, color, flash, lift) is
+  `MathUtils.damp`ed toward a target that is a pure function of
+  `steps[cursor]`, so every scene is scrub-safe by construction and needs no
+  keyframes — the swap/hop arc is lift ∝ distance still to travel. Colors
+  resolve through `token()` only, re-resolved via a MutationObserver on
   `<html data-theme>` (the memo is keyed by theme, per the caching rule);
-  element identity across steps comes from the shared `stage/slotIds.ts`
-  (extracted from views.tsx, used by both rails).
+  element identity comes from `stage/slotIds.ts` (arrays, both rails) and
+  the QueueView offset trick (queues); `stage/treeLayout.ts` is the shared
+  2D/3D tree layout.
   (play/pause/speed/step/scrub — scrubbing renders `steps[cursor]`, no
   re-execution), VerdictBanner ("Jump to failing step" seeks to
   `divergenceStepIndex`), ExplainPanel. State: Zustand store (`store.ts`) —
@@ -317,9 +328,18 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   requestAnimationFrame** (window occluded), so animation smoothness cannot be
   observed under automation — only settled states were verified; play it in a
   real tab to judge motion. Typecheck, prod build and all unit tests pass.
+- Done (2026-07-31): **3D scenes for every structure kind** on
+  `visionds-3d-stage` (see apps/web notes). Browser-verified on live Python
+  runs: array rail (+ pointer chips, ghost slots, pointed tint), stack tower
+  (drop-in push, `top` tag), queue conveyor (rear entry, forward glide on
+  dequeue, ← out/in ← floor marks), dict pads (height-coded values, key
+  labels), set honeycomb gems, and both matrices of a Min Path Sum run
+  (height-field filling in). Linked-list chain and tree mobile are
+  code-complete and typechecked but not yet exercised in a browser (needs a
+  ListNode/TreeNode-producing run). Same automation caveat as before: rAF is
+  throttled in the driven window, so only settled states were verified.
 - Not built yet: production sandbox for the trace service, Claude explainer
-  option, graph/adjacency visualization, 3D treatment for matrices and other
-  structure kinds (they keep the 2D views). Known minor: bundling supabase-js grew
+  option, graph/adjacency visualization. Known minor: bundling supabase-js grew
   the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.
 
 ## Repo conventions
