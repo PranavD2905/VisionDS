@@ -144,4 +144,101 @@ describe('harness.py via pyodide', () => {
     const grid = trace.steps[0]!.locals.find((v) => v.name === 'grid');
     expect(grid?.kind).toBe('matrix');
   });
+
+  it('detects ListNode chains as linkedlist snapshots', () => {
+    const code = `class ListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+def reverseList(vals):
+    head = None
+    for v in reversed(vals):
+        head = ListNode(v, head)
+    prev = None
+    curr = head
+    while curr:
+        nxt = curr.next
+        curr.next = prev
+        prev = curr
+        curr = nxt
+    out = []
+    while prev:
+        out.append(prev.val)
+        prev = prev.next
+    return out
+`;
+    const trace = runCaseInPyodide(py, code, {
+      input: '[1,2,3,4,5]',
+      expected: '[5,4,3,2,1]',
+    });
+    expect(trace.result.verdict).toBe('pass');
+    // mid-reversal, `prev` and `curr` are both chains
+    const mid = trace.steps.find((s) => {
+      const prev = s.locals.find((v) => v.name === 'prev');
+      const curr = s.locals.find((v) => v.name === 'curr');
+      return prev?.kind === 'linkedlist' && curr?.kind === 'linkedlist';
+    });
+    expect(mid).toBeDefined();
+    const prev = mid!.locals.find((v) => v.name === 'prev')!;
+    const value = prev.value as { vals: unknown[]; cyclesTo: number | null };
+    expect(Array.isArray(value.vals)).toBe(true);
+    expect(value.cyclesTo).toBeNull();
+  });
+
+  it('detects a cycle in a ListNode chain', () => {
+    const code = `class ListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+def makeCycle(vals):
+    head = ListNode(vals[0])
+    tail = head
+    for v in vals[1:]:
+        tail.next = ListNode(v)
+        tail = tail.next
+    tail.next = head.next  # cycle back to node #1
+    probe = head
+    return len(vals)
+`;
+    const trace = runCaseInPyodide(py, code, { input: '[1,2,3]', expected: '3' });
+    expect(trace.result.verdict).toBe('pass');
+    const probed = trace.steps
+      .flatMap((s) => s.locals)
+      .filter((v) => v.name === 'probe' && v.kind === 'linkedlist');
+    expect(probed.length).toBeGreaterThan(0);
+    const value = probed.at(-1)!.value as { vals: unknown[]; cyclesTo: number | null };
+    expect(value.vals).toEqual([1, 2, 3]);
+    expect(value.cyclesTo).toBe(1);
+  });
+
+  it('detects TreeNode structures as tree snapshots', () => {
+    const code = `class TreeNode:
+    def __init__(self, val=0, left=None, right=None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+def build(vals):
+    root = TreeNode(vals[0])
+    root.left = TreeNode(vals[1])
+    root.right = TreeNode(vals[2])
+    return root.left.val
+`;
+    const trace = runCaseInPyodide(py, code, { input: '[2,1,3]', expected: '1' });
+    expect(trace.result.verdict).toBe('pass');
+    const roots = trace.steps
+      .flatMap((s) => s.locals)
+      .filter((v) => v.name === 'root' && v.kind === 'tree');
+    expect(roots.length).toBeGreaterThan(0);
+    const value = roots.at(-1)!.value as {
+      val: unknown;
+      left: { val: unknown } | null;
+      right: { val: unknown } | null;
+    };
+    expect(value.val).toBe(2);
+    expect(value.left?.val).toBe(1);
+    expect(value.right?.val).toBe(3);
+  });
 });
