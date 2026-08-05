@@ -55,7 +55,11 @@ pnpm workspaces monorepo:
   under `harness.py`'s `sys.settrace` tracer: LeetCode-style input parsing
   (one arg per line, `name = literal` accepted; entry point = last top-level
   def, else last public method of `class Solution`), capped locals snapshots,
-  stdout capture, verdict + divergence detection. A JS-side watchdog
+  stdout capture, verdict + divergence detection. Node-shaped objects are
+  **duck-typed, never name-matched** — `val`+`left`+`right` → `tree`,
+  `val`+`next` → `linkedlist` — so a student's own class name works; the walks
+  are identity-tracked (a cyclic list reports `cyclesTo`) and item-capped.
+  A JS-side watchdog
   (cap + 10s) terminates the worker for loops Python can't interrupt →
   clean `timeout` verdict, never a frozen tab. `ServerRunner`: POSTs
   `{language, code, testCase}` to the trace service and schema-validates the
@@ -334,10 +338,18 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   (drop-in push, `top` tag), queue conveyor (rear entry, forward glide on
   dequeue, ← out/in ← floor marks), dict pads (height-coded values, key
   labels), set honeycomb gems, and both matrices of a Min Path Sum run
-  (height-field filling in). Linked-list chain and tree mobile are
-  code-complete and typechecked but not yet exercised in a browser (needs a
-  ListNode/TreeNode-producing run). Same automation caveat as before: rAF is
+  (height-field filling in). Same automation caveat as before: rAF is
   throttled in the driven window, so only settled states were verified.
+- Done & verified (2026-08-06): **Python tracer emits `tree`/`linkedlist`
+  kinds**, which is what the chain and mobile scenes were waiting on — before
+  this, node objects fell through to `repr` and showed as
+  `<__main__.TreeNode object at 0x…>` on stage. Browser-verified: a BST-insert
+  run draws the mobile (root 5 over 3/8 over 1/4), and a list reversal draws
+  three chains mid-flight (`prev` 3→2→1 reversed, `curr` 4→5 remaining,
+  `head` 1→∅). 3 new harness tests cover chain, cycle (`cyclesTo`), and tree.
+  Note for dev: editing `harness.py` needs a **dev-server restart**, not just
+  HMR — the worker keeps the old `?raw` import and the run dies with
+  "worker crashed".
 - Not built yet: production sandbox for the trace service, Claude explainer
   option, graph/adjacency visualization. Known minor: bundling supabase-js grew
   the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.
