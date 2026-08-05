@@ -1,0 +1,99 @@
+import { incrementExplainCount } from '@visionds/auth';
+import { GeminiExplainer } from '@visionds/explainer';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../auth/AuthProvider';
+import { useActiveTrace, useVis } from '../store';
+
+const KEY_STORAGE = 'visionds.geminiKey';
+
+export function ExplainPanel() {
+  const trace = useActiveTrace();
+  const explanation = useVis((s) => s.explanation);
+  const setExplanation = useVis((s) => s.setExplanation);
+  const { configured, user, client } = useAuth();
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem(KEY_STORAGE) ?? '');
+  const [editingKey, setEditingKey] = useState(!apiKey);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!trace || trace.steps.length === 0) return null;
+
+  // When accounts are enabled, the explainer requires sign-in (usage gating).
+  // On builds with no Supabase project, it stays open to everyone.
+  const gated = configured && !user;
+
+  const saveKey = (value: string) => {
+    setApiKey(value);
+    localStorage.setItem(KEY_STORAGE, value);
+  };
+
+  const onExplain = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (client && user) {
+        // Enforce the per-user cap before spending the model call.
+        await incrementExplainCount(client);
+      }
+      const explainer = new GeminiExplainer({ apiKey });
+      setExplanation(await explainer.explain(trace));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (gated) {
+    return (
+      <div className="explain-panel">
+        <div className="explain-key-row">
+          <span className="hint">
+            <Link to="/login">Sign in</Link> to use the AI explainer.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="explain-panel">
+      {editingKey ? (
+        <div className="explain-key-row">
+          <input
+            type="password"
+            placeholder="Gemini API key (stays in your browser)"
+            value={apiKey}
+            onChange={(e) => saveKey(e.target.value)}
+          />
+          <button disabled={!apiKey} onClick={() => setEditingKey(false)}>
+            Save
+          </button>
+          <span className="hint">
+            Free key at aistudio.google.com — stored only in this browser's
+            localStorage, sent only to Google.
+          </span>
+        </div>
+      ) : explanation ? (
+        <div className="explain-summary">
+          <span className="explain-label">AI</span>
+          <p>{explanation.summary}</p>
+          <button className="explain-clear" onClick={() => setExplanation(null)}>
+            clear
+          </button>
+        </div>
+      ) : (
+        <div className="explain-key-row">
+          <button className="explain-btn" onClick={onExplain} disabled={busy}>
+            {busy ? 'Asking Gemini…' : '✨ Explain this run'}
+          </button>
+          <button className="explain-clear" onClick={() => setEditingKey(true)}>
+            change key
+          </button>
+          {error && <span className="error-note">{error}</span>}
+        </div>
+      )}
+    </div>
+  );
+}

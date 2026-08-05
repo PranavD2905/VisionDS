@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "VisionDS — LeetCode Import",
+  "version": "0.1.0",
+  "description": "Grab your LeetCode code + testcases and watch an animated dry-run in VisionDS.",
+  "permissions": ["scripting", "activeTab", "storage", "identity"],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "https://*.leetcode.com/*",
+    "https://*.supabase.co/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Open in VisionDS"
+  }
+}

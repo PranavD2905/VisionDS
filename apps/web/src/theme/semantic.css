@@ -1,0 +1,155 @@
+/* ============================================================================
+   THEME LAYER 2 — SEMANTIC TOKENS
+   The contract every consumer depends on. Names describe the *role* a color
+   plays, so a component can never know which hue it got.
+
+   Adding a theme means adding a mapping block below — no consumer changes.
+   That is the whole point: consumers are closed for modification, the theme is
+   open for extension. Anything outside this file that names a primitive (or,
+   worse, a literal) is a defect.
+
+   Two themes ship: `specimen` (dark) and `daylight` (light). An inline script
+   in index.html stamps `data-theme` on <html> before first paint, so there is
+   no flash and this file only ever needs the two explicit blocks.
+   ========================================================================== */
+
+:root,
+[data-theme='specimen'] {
+  /* --- surfaces: page → specimen → inset → cell ------------------------- */
+  --bg: var(--black-950);
+  --bg-deep: var(--black-1000);
+  --panel: var(--black-900);
+  --panel-2: var(--black-850);
+  --cell-bg: var(--black-800);
+  --cell-bg-raised: var(--black-700);
+
+  /* --- lines ------------------------------------------------------------- */
+  --border: var(--white-a10);
+  --border-strong: var(--white-a22);
+  --border-faint: var(--white-a04);
+
+  /* --- ink --------------------------------------------------------------- */
+  --text: var(--white-050);
+  --text-inverse: var(--black-1000);
+  --muted: var(--white-400);
+  --muted-dim: var(--white-500);
+
+  /* --- accent: live state only ------------------------------------------ */
+  --accent: var(--acid-500);
+  --accent-strong: var(--acid-400);
+  --accent-soft: var(--acid-300);
+  --pulse: color-mix(in srgb, var(--accent) 40%, transparent);
+  --accent-wash: color-mix(in srgb, var(--accent) 10%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 30%, transparent);
+  --glow: 0 0 18px color-mix(in srgb, var(--accent) 30%, transparent);
+
+  /* --- verdicts ---------------------------------------------------------- */
+  --pass: var(--mint-500);
+  --fail: var(--red-500);
+  --warn: var(--amber-500);
+
+  /* --- layers ------------------------------------------------------------ */
+  --ai: var(--violet-500); /* the opt-in explain layer, never the app itself */
+  --link: var(--sky-500);
+
+  /* --- effects ----------------------------------------------------------- */
+  --scrim: var(--black-a60);
+  --scrim-strong: var(--black-a90);
+  --shadow-pop: 0 8px 20px var(--black-a40);
+  --shadow-menu: 0 12px 32px var(--black-a40);
+
+  /* --- motion-carried state --------------------------------------------- */
+  /* the flash a cell wears the instant its value changes */
+  --flash-from: color-mix(in srgb, var(--accent) 40%, transparent);
+  --flash-to: color-mix(in srgb, var(--accent) 0%, transparent);
+
+  /* --- editor: CodeMirror builds its own stylesheet, so it reads these --- */
+  --editor-bg: var(--panel);
+  --editor-text: var(--text);
+  --editor-gutter: var(--muted-dim);
+  --editor-keyword: var(--accent);
+  --editor-entity: var(--text);
+  --editor-type: var(--accent-soft);
+  --editor-string: var(--pass);
+  --editor-number: var(--warn);
+  --editor-comment: var(--muted-dim);
+  --editor-operator: var(--muted);
+  --editor-meta: var(--ai);
+  --editor-invalid: var(--fail);
+
+  color-scheme: dark;
+}
+
+/* ============================================================================
+   DAYLIGHT — the light theme.
+
+   Same token names, different mapping. Two roles carry the whole inversion:
+   `--accent` darkens from acid to deep chartreuse so it stays legible as ink
+   on paper, and `--text-inverse` flips to white so it still reads on top of an
+   accent fill. Every consumer is untouched.
+   ========================================================================== */
+
+[data-theme='daylight'] {
+  /* --- surfaces: page → specimen → inset → cell ------------------------- */
+  --bg: var(--paper-050);
+  --bg-deep: var(--paper-100);
+  --panel: var(--paper-000);
+  --panel-2: var(--paper-100);
+  --cell-bg: var(--paper-200);
+  --cell-bg-raised: var(--paper-300);
+
+  /* --- lines ------------------------------------------------------------- */
+  --border: var(--ink-a10);
+  --border-strong: var(--ink-a26);
+  --border-faint: var(--ink-a06);
+
+  /* --- ink --------------------------------------------------------------- */
+  --text: var(--ink-1000);
+  --text-inverse: var(--paper-000);
+  --muted: var(--ink-600);
+  --muted-dim: var(--ink-500);
+
+  /* --- accent: live state only ------------------------------------------ */
+  --accent: var(--acid-700);
+  --accent-strong: var(--acid-800);
+  --accent-soft: var(--acid-600);
+  --pulse: color-mix(in srgb, var(--accent) 40%, transparent);
+  --accent-wash: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 34%, transparent);
+  --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+
+  /* --- verdicts ---------------------------------------------------------- */
+  --pass: var(--mint-700);
+  --fail: var(--red-700);
+  --warn: var(--amber-700);
+
+  /* --- layers ------------------------------------------------------------ */
+  --ai: var(--violet-700);
+  --link: var(--sky-700);
+
+  /* --- effects ----------------------------------------------------------- */
+  --scrim: var(--ink-a26);
+  --scrim-strong: var(--ink-a26);
+  --shadow-pop: 0 6px 18px var(--ink-a14);
+  --shadow-menu: 0 10px 28px var(--ink-a14);
+
+  /* --- motion-carried state --------------------------------------------- */
+  --flash-from: color-mix(in srgb, var(--accent) 40%, transparent);
+  --flash-to: color-mix(in srgb, var(--accent) 0%, transparent);
+
+  /* --- editor ------------------------------------------------------------ */
+  --editor-bg: var(--panel);
+  --editor-text: var(--text);
+  --editor-gutter: var(--muted-dim);
+  --editor-keyword: var(--accent);
+  --editor-entity: var(--text);
+  --editor-type: var(--accent-strong);
+  --editor-string: var(--pass);
+  --editor-number: var(--warn);
+  --editor-comment: var(--muted-dim);
+  --editor-operator: var(--muted);
+  --editor-meta: var(--ai);
+  --editor-invalid: var(--fail);
+
+  color-scheme: light;
+}

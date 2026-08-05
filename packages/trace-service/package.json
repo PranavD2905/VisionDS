@@ -1,0 +1,24 @@
+{
+  "name": "@visionds/trace-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/bin/serve.ts",
+    "start": "tsx src/bin/serve.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@visionds/trace-schema": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

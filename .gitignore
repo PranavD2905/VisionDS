@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vite/
+*.local
+.DS_Store
+coverage/
+.env
+.env.*
+!.env.example
+
+# local design-tool workspace (session state, not source)
+.impeccable/
