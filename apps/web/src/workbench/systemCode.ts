@@ -1,6 +1,8 @@
 import {
+  dedupeEntries,
   listCppEntryCandidates,
   listJavaEntryCandidates,
+  resolveEntryPick,
   type Entry,
   type TestCase,
 } from '@visionds/trace-schema';
@@ -74,13 +76,14 @@ export async function getDefaultSystemCode(
   entryOverride?: Entry,
 ): Promise<{ systemCode: string; entry: Entry; candidates: Entry[] }> {
   if (language === 'python') {
-    const candidates = listPythonEntryCandidates(studentCode);
+    const candidates = dedupeEntries(listPythonEntryCandidates(studentCode));
     if (candidates.length === 0) {
       return { systemCode: '', entry: { name: '', className: null }, candidates: [] };
     }
-    const entry =
-      (entryOverride && candidates.find((c) => c.name === entryOverride.name)) ??
-      candidates[candidates.length - 1]!;
+    // Resolve on name *and* class: a free `foo` and `Solution.foo` are two
+    // distinct options, and matching by name alone made the second one
+    // unselectable — the picker regenerated the first and snapped back to it.
+    const entry = resolveEntryPick(candidates, entryOverride) ?? candidates[candidates.length - 1]!;
     return { systemCode: defaultPythonSystemCode(entry), entry, candidates };
   }
 
@@ -88,10 +91,11 @@ export async function getDefaultSystemCode(
   // to run client-side directly via the same trace-schema functions the
   // trace service uses server-side for the real default — only the
   // literal-generation for the call-site text stays server-side.
-  const candidates: Entry[] =
+  const candidates: Entry[] = dedupeEntries(
     language === 'java'
       ? listJavaEntryCandidates(studentCode).map((c) => ({ name: c.name, className: 'Solution' }))
-      : listCppEntryCandidates(studentCode);
+      : listCppEntryCandidates(studentCode),
+  );
 
   const runner = runnerFor(language);
   if (!(runner instanceof ServerRunner)) {

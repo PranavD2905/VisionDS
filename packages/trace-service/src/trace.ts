@@ -8,8 +8,7 @@ import {
   type ExecutionTrace,
   type JsonValue,
   type TestCase,
-  type TraceStep,
-} from '@visionds/trace-schema';
+  type TraceStep, resolveEntryPick } from '@visionds/trace-schema';
 import { cppAdapter } from './adapters/cpp';
 import { generateDefaultSystemCode as generateDefaultCppSystemCode } from './adapters/cpp/harness';
 import { javaAdapter } from './adapters/java';
@@ -47,20 +46,32 @@ export function getDefaultSystemCode(
   entryOverride?: Entry,
 ): { systemCode: string; entry: Entry } {
   const lang = language.toLowerCase();
-  if (lang === 'cpp' || lang === 'c++') {
-    // CppEntry is exactly {name, className} — the wire-level Entry shape
-    // already matches, no lookup needed.
-    return generateDefaultCppSystemCode(code, entryOverride ?? undefined);
-  }
-  if (lang === 'java') {
-    // JavaEntry carries returnType/params too (needed to build typed decls);
-    // resolve the wire-level {name, className} pick against the current
-    // code's candidate list to recover the full signature.
-    const resolved = entryOverride
-      ? listJavaEntryCandidates(code).find((c) => c.name === entryOverride.name)
-      : undefined;
-    const seed = generateDefaultJavaSystemCode(code, resolved);
-    return { systemCode: seed.systemCode, entry: { name: seed.entry.name, className: 'Solution' } };
+  // Everything below is analysis of a *submission*, and the detectors signal an
+  // ordinary mistake ("no `class Solution` found", "no public method") with a
+  // plain Error. Normalizing here is what makes those reach callers as user
+  // errors rather than service faults — without it the HTTP layer's 4xx branch
+  // is nearly dead code, since detection failure is the common case.
+  try {
+    if (lang === 'cpp' || lang === 'c++') {
+      // CppEntry is exactly {name, className} — the wire-level Entry shape
+      // already matches, no lookup needed.
+      return generateDefaultCppSystemCode(code, entryOverride ?? undefined);
+    }
+    if (lang === 'java') {
+      // JavaEntry carries returnType/params too (needed to build typed decls);
+      // resolve the wire-level {name, className} pick against the current
+      // code's candidate list to recover the full signature. The adapter
+      // resolves the same way at run time, so a seed and its run agree.
+      const resolved = resolveEntryPick(listJavaEntryCandidates(code), entryOverride);
+      const seed = generateDefaultJavaSystemCode(code, resolved);
+      return {
+        systemCode: seed.systemCode,
+        entry: { name: seed.entry.name, className: 'Solution' },
+      };
+    }
+  } catch (e) {
+    if (e instanceof TraceUserError) throw e;
+    throw new TraceUserError(e instanceof Error ? e.message : String(e));
   }
   throw new TraceUserError(`unsupported language: ${language}`);
 }
@@ -97,9 +108,16 @@ export function traceCase(
       resolvedSystemCode = systemCode!;
       resolvedEntry = entry!;
     } else {
+      // The seed is generated *from* the caller's entry when there is one, so
+      // `seed.entry` is that same choice after the detector has corrected it
+      // (Java, for instance, fills in the `Solution` class the caller left
+      // null). Preferring the raw caller entry here would leave `trace.entry`
+      // describing a different function than `resolvedSystemCode` actually
+      // calls, and the adapters read both — C++ signature extraction would
+      // hunt for a free function while the system code calls `Solution::…`.
       const seed = getDefaultSystemCode(language, code, haveEntry ? entry : undefined);
       resolvedSystemCode = haveSystemCode ? systemCode! : seed.systemCode;
-      resolvedEntry = haveEntry ? entry! : seed.entry;
+      resolvedEntry = seed.entry;
     }
   } catch (e) {
     if (e instanceof TraceUserError) return errorTrace(language, code, testCase, e.message);

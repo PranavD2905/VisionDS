@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listJavaEntryCandidates, type Entry, type TestCase } from '@visionds/trace-schema';
+import { listJavaEntryCandidates, type Entry, type TestCase, resolveEntryPick } from '@visionds/trace-schema';
 import { CAPS_JSON } from '../../caps';
 import { type LanguageAdapter, type PreparedProgram, TraceUserError } from '../types';
 import { assembleJavaProgram } from './harness';
@@ -55,7 +55,7 @@ export const javaAdapter: LanguageAdapter = {
   prepare(studentCode: string, systemCode: string, entry: Entry, testCase: TestCase): PreparedProgram {
     // The wire-level Entry only carries {name, className}; recover the full
     // signature (needed to type argument decls) from the current code.
-    const resolved = listJavaEntryCandidates(studentCode).find((c) => c.name === entry.name) ?? {
+    const resolved = resolveEntryPick(listJavaEntryCandidates(studentCode), entry) ?? {
       name: entry.name,
       returnType: 'void',
       params: [],

@@ -1,5 +1,5 @@
 import type { CppEntry, JsonValue, TestCase } from '@visionds/trace-schema';
-import { extractSignature, findCppEntry, listCppEntryCandidates } from '@visionds/trace-schema';
+import { extractSignature, findCppEntry, listCppEntryCandidates, resolveEntryPick } from '@visionds/trace-schema';
 import { parseArgs } from '../../parseInput';
 import { cppLiteralForType, inferCppArg } from './infer';
 
@@ -98,9 +98,7 @@ export function generateDefaultSystemCode(
   // racing a language switch, carrying over Python's `className: null`).
   // Re-resolving by name against this code's real candidates self-corrects
   // a wrong className/absence, the same defense Java's equivalent already has.
-  const resolved = entryOverride
-    ? listCppEntryCandidates(code).find((c) => c.name === entryOverride.name)
-    : undefined;
+  const resolved = resolveEntryPick(listCppEntryCandidates(code), entryOverride);
   const entry = resolved ?? findCppEntry(code);
   const sig = extractSignature(code, entry);
   const argCount = sig?.params.length ?? 0;
