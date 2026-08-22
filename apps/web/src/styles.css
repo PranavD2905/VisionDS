@@ -225,9 +225,91 @@ button:disabled { opacity: 0.45; cursor: default; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  /* --split is the source pane's share, driven by the splitter drag. Kept as
+     a fraction rather than pixels so the proportions survive a window resize. */
+  grid-template-columns: minmax(0, calc(var(--split, 0.46) * 100%)) auto minmax(0, 1fr);
   gap: var(--s-2);
 }
+
+/* ---------- splitters ---------- */
+
+.splitter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  flex-shrink: 0;
+  /* the hit area is deliberately wider than the visible grip: a 2px target is
+     unusable, but a fat bar would eat the layout */
+  touch-action: none;
+}
+.splitter.vertical { width: 9px; cursor: col-resize; }
+.splitter.horizontal { height: 9px; cursor: row-resize; }
+.splitter-grip {
+  background: var(--border);
+  border-radius: var(--r-pill);
+  transition: background 120ms ease;
+}
+.splitter.vertical .splitter-grip { width: 2px; height: 40px; }
+.splitter.horizontal .splitter-grip { height: 2px; width: 40px; }
+.splitter:hover .splitter-grip,
+.splitter:focus-visible .splitter-grip,
+.splitter.dragging .splitter-grip { background: var(--accent); }
+.splitter:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+/* while dragging, the cursor must not flicker as it crosses the editor or a
+   canvas, and nothing may select under the pointer */
+body.resizing-col, body.resizing-col * { cursor: col-resize !important; user-select: none !important; }
+body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-select: none !important; }
+
+/* ---------- pane toggles (app bar) ----------
+   Miniature maps of the window, VS Code style: the framed rect is the
+   workbench, the band inside is the region the button controls. Solid = the
+   region is showing. */
+
+.pane-toggles { display: inline-flex; align-items: center; gap: 2px; }
+.pane-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--dur-1) ease, background var(--dur-1) ease;
+}
+.pane-toggle:hover { color: var(--text); background: var(--panel-2); }
+.pane-toggle.on { color: var(--accent); }
+.pane-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* both regions collapsed: the source pane is not rendered at all and the
+   stage takes the whole window. Run moves to the app bar so hiding the editor
+   never costs you the ability to run. */
+.workbench-split.source-collapsed { grid-template-columns: minmax(0, 1fr); }
+
+/* editor / testcases split inside the source pane */
+.source-split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, calc(var(--editor-split, 0.62) * 100%)) auto minmax(0, 1fr);
+}
+.editor-region {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* one region collapsed: the survivor takes the whole pane */
+.source-split.single { grid-template-rows: minmax(0, 1fr); }
+/* the grid row governs here, so the standalone max-height must not also apply */
+.source-split > .pane-scroll { flex: none; max-height: none; }
 
 .pane {
   display: flex;
@@ -393,6 +475,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .run-btn:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
 .run-btn:disabled { opacity: 0.7; }
+/* app-bar variant, shown only while the source pane is collapsed away */
+.run-btn.compact { padding: 5px 14px; font-size: 11px; }
 .run-hint { display: inline-flex; gap: 3px; align-items: center; color: var(--muted); }
 .demo-btn { color: var(--muted); font-size: 12px; }
 .error-note {
@@ -1036,7 +1120,11 @@ button:disabled { opacity: 0.45; cursor: default; }
    the whole workbench stays reachable with one thumb. */
 @media (max-width: 900px) {
   .workbench { height: auto; min-height: 100dvh; }
+  /* stacked on narrow screens: a drag handle between stacked panes has no
+     meaningful axis, so both splits collapse to their natural sizes */
   .workbench-split { grid-template-columns: 1fr; }
+  .splitter { display: none; }
+  .source-split { grid-template-rows: minmax(0, 1fr) auto; }
   .pane { min-height: 70vh; }
   .case-row { grid-template-columns: 1fr auto; }
   .case-row label:first-of-type { grid-column: 1 / -1; }

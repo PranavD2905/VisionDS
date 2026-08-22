@@ -3,6 +3,8 @@ import { twoSumFailTrace, type Entry, type TestCase } from '@visionds/trace-sche
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AccountMenu } from '../auth/AccountMenu';
+import { PaneToggle } from '../components/PaneToggles';
+import { Splitter } from '../components/Splitter';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuth } from '../auth/AuthProvider';
 import { DEFAULT_LANGUAGE, langById } from '../languages';
@@ -10,6 +12,8 @@ import { readImportFromHash, type ImportProblem } from '../lib/import';
 import { useActiveTrace, useVis } from '../store';
 import { SourcePane } from '../workbench/SourcePane';
 import { StagePane } from '../workbench/StagePane';
+import { readDraft, writeDraft, type WorkbenchDraft } from '../workbench/draft';
+import { readLayout, writeLayout, type WorkbenchLayout } from '../workbench/layout';
 import { getDefaultSystemCode } from '../workbench/systemCode';
 import { useRun } from '../workbench/useRun';
 
@@ -33,20 +37,46 @@ export function WorkbenchPage() {
   const location = useLocation();
   const { user, client } = useAuth();
 
-  const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
-  const [code, setCode] = useState(() => langById(DEFAULT_LANGUAGE).starterCode);
-  const [systemCode, setSystemCode] = useState('');
+  /**
+   * What the student last had on screen, restored from localStorage. Read once
+   * so every piece of initial state agrees on the same snapshot. A `#import=`
+   * handoff, a history re-open and an extension capture all still win over it —
+   * they call `load()` from effects that run after this initial state is set.
+   */
+  const [restored] = useState(readDraft);
+
+  /** Pane sizes — dragged by the splitters, persisted per browser. */
+  const [layout, setLayout] = useState<WorkbenchLayout>(readLayout);
+  const splitRef = useRef<HTMLElement>(null);
+  const setSplit = (split: number) => setLayout((l) => ({ ...l, split }));
+  const toggleRegion = (key: 'codeOpen' | 'casesOpen') =>
+    setLayout((l) => ({ ...l, [key]: !l[key] }));
+  /** Both regions collapsed: nothing left to edit, so the stage takes the room. */
+  const sourceCollapsed = !layout.codeOpen && !layout.casesOpen;
+  const setEditorSplit = (editorSplit: number) => setLayout((l) => ({ ...l, editorSplit }));
+  useEffect(() => {
+    const timer = setTimeout(() => writeLayout(layout), 300);
+    return () => clearTimeout(timer);
+  }, [layout]);
+
+  const [language, setLanguage] = useState(restored?.language ?? DEFAULT_LANGUAGE);
+  const [code, setCode] = useState(() => restored?.code ?? langById(DEFAULT_LANGUAGE).starterCode);
+  const [systemCode, setSystemCode] = useState(restored?.systemCode ?? '');
   const [entry, setEntry] = useState<Entry | undefined>(undefined);
   const [candidates, setCandidates] = useState<Entry[]>([]);
   /** True once the student has directly edited the system-code strip — after
    * that, further code edits stop auto-regenerating it (the student owns it). */
-  const [systemCodeDirty, setSystemCodeDirty] = useState(false);
+  const [systemCodeDirty, setSystemCodeDirty] = useState(restored?.systemCodeDirty ?? false);
   /** False while a default system-code fetch is in flight — Run is disabled
    * meanwhile, since running against a stale/empty systemCode can produce a
-   * broken program server-side (e.g. a C++ translation unit with no main()). */
-  const [systemCodeReady, setSystemCodeReady] = useState(false);
-  const [cases, setCases] = useState<TestCase[]>(() => langById(DEFAULT_LANGUAGE).starterCases);
-  const [imported, setImported] = useState<ImportProblem | null>(null);
+   * broken program server-side (e.g. a C++ translation unit with no main()).
+   * A restored *dirty* strip starts ready: the rescan effect below bails out
+   * on dirty drafts, so nothing else would ever flip this true again. */
+  const [systemCodeReady, setSystemCodeReady] = useState(restored?.systemCodeDirty ?? false);
+  const [cases, setCases] = useState<TestCase[]>(
+    () => restored?.cases ?? langById(DEFAULT_LANGUAGE).starterCases,
+  );
+  const [imported, setImported] = useState<ImportProblem | null>(restored?.problem ?? null);
 
   const trace = useActiveTrace();
   const cursor = useVis((s) => s.cursor);
@@ -195,6 +225,23 @@ export function WorkbenchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, user]);
 
+  /**
+   * Mirror the draft back to storage. Debounced so a burst of typing writes
+   * once it settles rather than on every keystroke.
+   */
+  useEffect(() => {
+    const draft: WorkbenchDraft = {
+      language,
+      code,
+      cases,
+      systemCode,
+      systemCodeDirty,
+      problem: imported,
+    };
+    const timer = setTimeout(() => writeDraft(draft), 400);
+    return () => clearTimeout(timer);
+  }, [language, code, cases, systemCode, systemCodeDirty, imported]);
+
   const onRun = () => {
     if (!systemCodeReady) return;
     void run({ language, code, systemCode, entry, cases, problem: imported });
@@ -252,35 +299,80 @@ export function WorkbenchPage() {
           <Link to="/product" className="app-bar-link">
             Spec
           </Link>
+          {sourceCollapsed && (
+            <button
+              className="run-btn compact"
+              onClick={onRun}
+              disabled={busy || !systemCodeReady}
+              title="Run & visualize (⌘/Ctrl + ↵)"
+            >
+              {busy ? (status ?? 'Running…') : !systemCodeReady ? 'Preparing…' : 'Run'}
+            </button>
+          )}
+          <div className="pane-toggles" role="group" aria-label="Toggle panes">
+            <PaneToggle
+              region="code"
+              on={layout.codeOpen}
+              onToggle={() => toggleRegion('codeOpen')}
+              label="the code editor"
+            />
+            <PaneToggle
+              region="cases"
+              on={layout.casesOpen}
+              onToggle={() => toggleRegion('casesOpen')}
+              label="the testcases"
+            />
+          </div>
           <ThemeToggle />
           <AccountMenu />
         </div>
       </div>
 
-      <main className="workbench-split">
-        <SourcePane
-          language={language}
-          code={code}
-          systemCode={systemCode}
-          candidates={candidates}
-          cases={cases}
-          busy={busy}
-          runDisabled={!systemCodeReady}
-          status={status}
-          error={error}
-          activeLine={step?.line ?? null}
-          activeLineIsException={Boolean(isException)}
-          stale={
-            Boolean(trace) && (trace!.code !== code || (trace!.systemCode ?? '') !== systemCode)
-          }
-          onLanguage={switchLanguage}
-          onCode={setCode}
-          onSystemCode={onSystemCode}
-          onPickEntry={onPickEntry}
-          onCases={setCases}
-          onRun={onRun}
-          onDemo={language === 'python' ? () => show([twoSumFailTrace]) : undefined}
-        />
+      <main
+        className={`workbench-split${sourceCollapsed ? ' source-collapsed' : ''}`}
+        ref={splitRef}
+        style={{ ['--split' as string]: layout.split }}
+      >
+        {!sourceCollapsed && (
+          <SourcePane
+            editorSplit={layout.editorSplit}
+            onEditorSplit={setEditorSplit}
+            codeOpen={layout.codeOpen}
+            casesOpen={layout.casesOpen}
+            language={language}
+            code={code}
+            systemCode={systemCode}
+            candidates={candidates}
+            cases={cases}
+            busy={busy}
+            runDisabled={!systemCodeReady}
+            status={status}
+            error={error}
+            activeLine={step?.line ?? null}
+            activeLineIsException={Boolean(isException)}
+            stale={
+              Boolean(trace) && (trace!.code !== code || (trace!.systemCode ?? '') !== systemCode)
+            }
+            onLanguage={switchLanguage}
+            onCode={setCode}
+            onSystemCode={onSystemCode}
+            onPickEntry={onPickEntry}
+            onCases={setCases}
+            onRun={onRun}
+            onDemo={language === 'python' ? () => show([twoSumFailTrace]) : undefined}
+          />
+        )}
+        {!sourceCollapsed && (
+          <Splitter
+            orientation="vertical"
+            value={layout.split}
+            onChange={setSplit}
+            containerRef={splitRef}
+            min={0.22}
+            max={0.78}
+            label="Resize source and stage panes"
+          />
+        )}
         <StagePane trace={trace} />
       </main>
     </div>

@@ -191,15 +191,47 @@ pnpm workspaces monorepo:
   **The workbench** (`src/workbench/`) is a two-pane split: `SourcePane`
   (language, editor, testcases, run) and `StagePane` (verdict, diagrams,
   narration, transport), with `useRun` holding the run flow and `WorkbenchPage`
-  owning only the source state. There is **one copy of your code on screen**:
+  owning only the source state. That state is mirrored to localStorage by
+  `workbench/draft.ts` and restored as the initial state, so a refresh keeps
+  the student's code, testcases, language and system-code strip instead of
+  resetting to the two-sum starter; `#import=`, history re-open and extension
+  captures still win, since they `load()` from effects that run after initial
+  state is set. `readDraft` never throws — blocked storage, corrupt JSON, an
+  empty draft or an unknown language id all fall back to the starter.
+  There is **one copy of your code on screen**:
   the editor stays editable and marks the current step in place via
   `editorActiveLine.ts` (a CodeMirror decoration, so it tracks real line
   geometry). Editing after a run shows a "stale" note rather than pretending
-  the diagram still matches. Two layout rules matter: the editor must take a
-  *definite* height from its flex parent (a percentage height inside an
-  auto-height scroll parent puts CodeMirror's measure cycle into an infinite
-  loop that hangs the tab), and each pane scrolls internally so the page never
-  does.
+  the diagram still matches.
+  Either source region can also be **collapsed** from VS-Code-style toggles in
+  the app bar beside the theme switch (`components/PaneToggles.tsx`): the icon
+  is a miniature of the window with a band where that region actually sits
+  (code = the left column, testcases = the bottom strip — VS Code's side-bar
+  and panel icons), solid when showing. Collapsing the code takes the entry
+  picker and the system-code strip with it: both are code UI, and leaving a
+  second CodeMirror on screen made "hide the code" look broken. Collapsing one gives
+  the pane to the other and drops the drag handle (no boundary left to move);
+  collapsing both unmounts the source pane entirely so the stage takes the
+  whole window, and **Run moves into the app bar** — hiding the editor must
+  never cost the ability to run (⌘/Ctrl+Enter works either way, being a
+  window listener). The flags live in
+  `layout.ts` beside the split fractions, and only an explicit `false`
+  collapses — a missing flag must never hide a region nobody chose to hide.
+  Both splits are **drag-resizable** (`components/Splitter.tsx`, a
+  pointer-capture `separator` that is also arrow-key operable and
+  double-click-centres): source↔stage and, inside the source pane,
+  editor↔testcases. Positions are stored as *fractions* — so proportions
+  survive a window resize — driven into CSS as `--split` / `--editor-split`
+  grid tracks and persisted by `workbench/layout.ts`. The stage measures
+  itself (`stage/StageSize.tsx`, ResizeObserver) and publishes its box through
+  context; `Maybe3D`'s `fitSpec` clamps every scene's *preferred* size to the
+  room actually available, shrinking to fit and growing into spare space up to
+  1.5× (unbounded growth would let one structure swallow a stage holding
+  several). Two layout rules matter: the editor must take a *definite* height
+  from its parent — the grid row supplies it now — since a percentage height
+  inside an auto-height scroll parent puts CodeMirror's measure cycle into an
+  infinite loop that hangs the tab; and each pane scrolls internally so the
+  page never does.
   Marketing pages share `components/site/SiteChrome.tsx` (nav + footer) and
   `Reveal.tsx` (IntersectionObserver scroll reveal); marketing CSS is
   `src/site.css`, which also defines the `.frame` the workbench reuses.

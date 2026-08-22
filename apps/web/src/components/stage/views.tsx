@@ -4,6 +4,7 @@ import { Component, Suspense, lazy, useRef, type FC, type ReactNode } from 'reac
 import { fmt } from '../../lib/format';
 import { tokenAlpha } from '../../theme/tokens';
 import { useSlotIds } from './slotIds';
+import { useStageBox, type StageBox } from './StageSize';
 import { layoutTree, type TreeValue } from './treeLayout';
 import type { Stage3DProps } from './three/Stage3D';
 
@@ -349,6 +350,28 @@ function use3dBase(): boolean {
 }
 
 /**
+ * Fit a scene's *preferred* size to the room the stage actually has.
+ *
+ * Each view computes a size from its own data (item count, tree depth). The
+ * pane is user-resizable, so that number is a wish, not a fact: a 680px rail
+ * in a 380px pane used to overflow, and a narrow rail in a wide pane wasted
+ * the space. Scenes shrink to whatever is available and grow into it up to a
+ * bounded multiple of their preferred size — unbounded growth would let one
+ * structure swallow a stage that has several.
+ */
+const GROW = 1.5;
+function fitSpec(spec: Stage3DProps, box: StageBox): Stage3DProps {
+  if (box.width < 1 || box.height < 1) return spec; // not measured yet
+  const availW = Math.max(240, box.width - 8); // leave room for a scrollbar
+  const availH = Math.max(170, box.height - 8);
+  return {
+    ...spec,
+    width: Math.max(240, Math.min(availW, spec.width * GROW)),
+    height: Math.max(170, Math.min(availH, spec.height * GROW)),
+  };
+}
+
+/**
  * Renders the lazy 3D stage when eligible, else the 2D fallback. While the
  * three.js chunk loads, holds an empty stage-sized box — flashing the 2D view
  * reads as a glitch, and the entrance animation plays the "something is
@@ -363,13 +386,17 @@ function Maybe3D({
   fallback: ReactNode;
   spec: Stage3DProps;
 }) {
+  const box = useStageBox();
+  const fitted = fitSpec(spec, box);
   if (!ok) return <>{fallback}</>;
   return (
     <Stage3DBoundary fallback={fallback}>
       <Suspense
-        fallback={<div className="array3d" style={{ width: spec.width, height: spec.height }} />}
+        fallback={
+          <div className="array3d" style={{ width: fitted.width, height: fitted.height }} />
+        }
       >
-        <Stage3D {...spec} />
+        <Stage3D {...fitted} />
       </Suspense>
     </Stage3DBoundary>
   );

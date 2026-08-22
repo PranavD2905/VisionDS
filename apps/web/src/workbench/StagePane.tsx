@@ -2,7 +2,9 @@ import { buildCallTree, type ExecutionTrace } from '@visionds/trace-schema';
 import { useEffect, useMemo, useState } from 'react';
 import { CallTreeView } from '../components/CallTreeView';
 import { ExplainPanel } from '../components/ExplainPanel';
+import { EXPLAINER_ENABLED } from '../features';
 import { Stage } from '../components/Stage';
+import { StageSizeProvider, useMeasuredBox } from '../components/stage/StageSize';
 import { Transport } from '../components/Transport';
 import { VerdictBanner } from '../components/VerdictBanner';
 import { inferShapes, type StructShape } from '../lib/shapes';
@@ -18,6 +20,8 @@ export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
   const cursor = useVis((s) => s.cursor);
   const explanation = useVis((s) => s.explanation);
   const [view, setView] = useState<'stage' | 'calls'>('stage');
+  // the pane is user-resizable, so the scenes need the live size, not a mount-time read
+  const [stageRef, stageBox] = useMeasuredBox<HTMLDivElement>();
 
   // behavior-inferred structure shapes (stack/queue), computed once per trace
   const shapes = useMemo<Map<string, StructShape>>(
@@ -36,8 +40,11 @@ export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
     if (!hasRecursion) setView('stage');
   }, [hasRecursion]);
 
-  // subtitle-style narration: latest AI caption at or before the cursor
-  const caption = explanation?.annotations.filter((a) => a.stepIndex <= cursor).at(-1);
+  // subtitle-style narration: latest AI caption at or before the cursor.
+  // Gated with the panel — a caption is the explainer speaking too.
+  const caption = EXPLAINER_ENABLED
+    ? explanation?.annotations.filter((a) => a.stepIndex <= cursor).at(-1)
+    : undefined;
 
   if (!trace) {
     return (
@@ -93,8 +100,10 @@ export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
           {view === 'calls' && callTree ? (
             <CallTreeView tree={callTree} />
           ) : (
-            <div className="stage-scroll">
-              <Stage step={step} prev={prev} shapes={shapes} />
+            <div className="stage-scroll" ref={stageRef}>
+              <StageSizeProvider value={stageBox}>
+                <Stage step={step} prev={prev} shapes={shapes} />
+              </StageSizeProvider>
             </div>
           )}
           <div className="stage-dock">
@@ -119,7 +128,7 @@ export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
                 <pre>{step.stdout}</pre>
               </details>
             )}
-            <ExplainPanel />
+            {EXPLAINER_ENABLED && <ExplainPanel />}
           </div>
         </>
       ) : (
