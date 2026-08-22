@@ -1,6 +1,6 @@
-import type { JsonValue, TestCase } from '@visionds/trace-schema';
+import type { JavaEntry, JsonValue, TestCase } from '@visionds/trace-schema';
+import { findJavaEntry } from '@visionds/trace-schema';
 import { parseArgs } from '../../parseInput';
-import { findJavaEntry } from './entry';
 
 export const RESULT_SENTINEL = '__VISIONDS_RESULT__';
 
@@ -25,43 +25,71 @@ const BUILD_TREE =
   'static TreeNode __buildTree(Integer[] xs){ if(xs.length==0||xs[0]==null) return null; TreeNode root=new TreeNode(xs[0]); java.util.Queue<TreeNode> q=new java.util.LinkedList<>(); q.add(root); int i=1; while(!q.isEmpty()&&i<xs.length){ TreeNode n=q.poll(); if(i<xs.length){ if(xs[i]!=null){ n.left=new TreeNode(xs[i]); q.add(n.left);} i++;} if(i<xs.length){ if(xs[i]!=null){ n.right=new TreeNode(xs[i]); q.add(n.right);} i++;} } return root; }';
 
 /**
- * Build Solution.java (imports + student code, on known lines) and Main.java (a
- * runner that constructs the testcase arguments as typed Java, calls the entry,
- * and prints the result as JSON via a sentinel). ListNode/TreeNode are defined
- * only when the student uses but doesn't declare them.
+ * Build the default, student-visible/editable call-site — the region the UI
+ * shows in the collapsed system-code strip. Deliberately excludes argument
+ * *declarations* (`int a0 = 5;`): those are testcase-specific literal values
+ * that must be regenerated fresh for every testcase a run steps through, so
+ * they stay invisible boilerplate built at assemble time. `systemCode` only
+ * names *which* method is called and how the result is serialized — stable
+ * across every testcase.
  */
-export function generateJavaProgram(code: string, testCase: TestCase): GeneratedJava {
-  const entry = findJavaEntry(code);
-  const args = parseArgs(testCase.input);
-
-  const usesList = /\bListNode\b/.test(code);
-  const usesTree = /\bTreeNode\b/.test(code);
-  const definesList = /\b(?:class|record)\s+ListNode\b/.test(code);
-  const definesTree = /\b(?:class|record)\s+TreeNode\b/.test(code);
-
-  const useSig = entry.params.length === args.length;
-  const decls = args.map((v, i) => {
-    const type = useSig ? entry.params[i]!.type : inferType(v);
-    if (type === 'ListNode') return `    ListNode a${i} = __buildList(new int[]${intArray(v)});`;
-    if (type === 'TreeNode') return `    TreeNode a${i} = __buildTree(new Integer[]${integerArray(v)});`;
-    if (type.endsWith('[]')) return `    ${type} a${i} = ${javaLiteral(type, v)};`;
-    return `    ${type} a${i} = ${javaLiteral(type, v)};`;
-  });
-
-  const argList = args.map((_, i) => `a${i}`).join(', ');
+export function generateDefaultJavaSystemCode(
+  code: string,
+  entryOverride?: JavaEntry,
+): { systemCode: string; entry: JavaEntry } {
+  const entry = entryOverride ?? findJavaEntry(code);
+  const argList = entry.params.map((_, i) => `a${i}`).join(', ');
   const isVoid = entry.returnType === 'void';
   const callAndOut = isVoid
     ? [
         `    new Solution().${entry.name}(${argList});`,
-        `    String __out = __json(a${voidTargetIndex(entry.params, args)});`,
+        `    String __out = __json(a${voidTargetIndex(entry.params)});`,
       ]
     : [
         `    var __r = new Solution().${entry.name}(${argList});`,
         '    String __out = __json(__r);',
       ];
 
-  const solutionLines = [IMPORTS, ...code.replace(/\n+$/, '').split('\n')];
+  const body = [
+    '    // ---- arguments ----',
+    ...callAndOut,
+    `    System.out.println("${RESULT_SENTINEL}" + __out);`,
+  ];
+  return { systemCode: body.join('\n'), entry };
+}
+
+/**
+ * Build Solution.java (imports + student code, on known lines) and Main.java
+ * (invisible boilerplate + freshly-generated argument decls for *this*
+ * testcase + the given call-site — the default from
+ * `generateDefaultJavaSystemCode`, or whatever the student edited it to).
+ */
+export function assembleJavaProgram(
+  studentCode: string,
+  systemCode: string,
+  entry: JavaEntry,
+  testCase: TestCase,
+): GeneratedJava {
+  const args = parseArgs(testCase.input);
+  const useSig = entry.params.length === args.length;
+  const decls = args.map((v, i) => {
+    const type = useSig ? entry.params[i]!.type : inferType(v);
+    if (type === 'ListNode') return `    ListNode a${i} = __buildList(new int[]${intArray(v)});`;
+    if (type === 'TreeNode') return `    TreeNode a${i} = __buildTree(new Integer[]${integerArray(v)});`;
+    return `    ${type} a${i} = ${javaLiteral(type, v)};`;
+  });
+
+  const usesList = /\bListNode\b/.test(studentCode);
+  const usesTree = /\bTreeNode\b/.test(studentCode);
+  const definesList = /\b(?:class|record)\s+ListNode\b/.test(studentCode);
+  const definesTree = /\b(?:class|record)\s+TreeNode\b/.test(studentCode);
+
+  const solutionLines = [IMPORTS, ...studentCode.replace(/\n+$/, '').split('\n')];
   const solution = solutionLines.join('\n') + '\n';
+
+  // Splice the freshly-generated decls in where the marker comment sits, so
+  // an edited call-site (different arg count) still lines up with `a0..an`.
+  const filledSystemCode = systemCode.replace('    // ---- arguments ----', decls.join('\n'));
 
   const mainParts: string[] = [IMPORTS, ''];
   if (usesList && !definesList) mainParts.push(LIST_STRUCT);
@@ -72,9 +100,7 @@ export function generateJavaProgram(code: string, testCase: TestCase): Generated
     ...(usesList ? [BUILD_LIST] : []),
     ...(usesTree ? [BUILD_TREE] : []),
     '  public static void main(String[] __args) {',
-    ...decls,
-    ...callAndOut,
-    `    System.out.println("${RESULT_SENTINEL}" + __out);`,
+    filledSystemCode,
     '  }',
     '}',
   );
@@ -115,9 +141,9 @@ function jsonHelper(usesList: boolean, usesTree: boolean): string[] {
   ];
 }
 
-function voidTargetIndex(params: { type: string }[], args: JsonValue[]): number {
+function voidTargetIndex(params: { type: string }[]): number {
   const idx = params.findIndex((p) => p.type.endsWith('[]') || /^List</.test(p.type));
-  return idx >= 0 ? idx : args.length > 0 ? 0 : 0;
+  return idx >= 0 ? idx : 0;
 }
 
 // ------------------------------------------------------------ literals

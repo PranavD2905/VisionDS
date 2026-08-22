@@ -1,6 +1,6 @@
-import type { JsonValue, TestCase } from '@visionds/trace-schema';
+import type { CppEntry, JsonValue, TestCase } from '@visionds/trace-schema';
+import { extractSignature, findCppEntry, listCppEntryCandidates } from '@visionds/trace-schema';
 import { parseArgs } from '../../parseInput';
-import { extractSignature, findCppEntry } from './entry';
 import { cppLiteralForType, inferCppArg } from './infer';
 
 export const RESULT_SENTINEL = '__VISIONDS_RESULT__';
@@ -80,24 +80,70 @@ const TREE_HELPERS = [
 ];
 
 /**
+ * Build the default, student-visible/editable call-site — the region the UI
+ * shows in the collapsed system-code strip. Deliberately excludes argument
+ * *declarations* (`int a0 = 5;`): those are testcase-specific literal values
+ * that must be regenerated fresh for every testcase a run steps through, so
+ * they stay invisible boilerplate built at assemble time, never baked into
+ * editable text a student could carry stale across testcases. `systemCode`
+ * itself only names *which* function is called (`Solution().twoSum(a0, a1)`)
+ * and how the result is serialized — stable across every testcase.
+ */
+export function generateDefaultSystemCode(
+  code: string,
+  entryOverride?: CppEntry,
+): { systemCode: string; entry: CppEntry } {
+  // Never trust an override's shape blindly — it may have been resolved
+  // against a *different* language's code (e.g. a stale client-side request
+  // racing a language switch, carrying over Python's `className: null`).
+  // Re-resolving by name against this code's real candidates self-corrects
+  // a wrong className/absence, the same defense Java's equivalent already has.
+  const resolved = entryOverride
+    ? listCppEntryCandidates(code).find((c) => c.name === entryOverride.name)
+    : undefined;
+  const entry = resolved ?? findCppEntry(code);
+  const sig = extractSignature(code, entry);
+  const argCount = sig?.params.length ?? 0;
+
+  const argList = Array.from({ length: argCount }, (_, i) => `a${i}`).join(', ');
+  const call = entry.className
+    ? `${entry.className}().${entry.name}(${argList})`
+    : `${entry.name}(${argList})`;
+
+  // In-place (void) solutions: run the call, then serialize the mutated
+  // argument (the first non-const reference) as the answer to compare.
+  const isVoid = sig?.returnType === 'void';
+  const callAndResult = isVoid
+    ? [`  ${call};`, `  string __out = __vds::j(a${sig ? voidTargetIndex(sig) : 0});`]
+    : [`  auto __r = ${call};`, '  string __out = __vds::j(__r);'];
+
+  const main = [
+    'int main(){',
+    '  // ---- arguments ----',
+    ...callAndResult,
+    `  cout << "${RESULT_SENTINEL}" << __out << "\\n";`,
+    '  return 0;',
+    '}',
+  ];
+
+  return { systemCode: main.join('\n'), entry };
+}
+
+/**
  * Build a single compilable translation unit: prelude (includes, serializers,
  * and conditionally the ListNode/TreeNode structs), the student's code verbatim
- * on known line numbers, then node builders/serializers and a generated `main`
- * that constructs the testcase arguments, calls the entry point, and prints the
- * result as JSON via a sentinel.
+ * on known line numbers, freshly-generated argument declarations for *this*
+ * testcase, then node builders/serializers and the (possibly student-edited)
+ * call-site from `systemCode`.
  */
-export function generateCppProgram(code: string, testCase: TestCase): GeneratedProgram {
-  const entry = findCppEntry(code);
-  const sig = extractSignature(code, entry);
+export function assembleCppProgram(
+  studentCode: string,
+  systemCode: string,
+  entry: CppEntry,
+  testCase: TestCase,
+): GeneratedProgram {
+  const sig = extractSignature(studentCode, entry);
   const args: JsonValue[] = parseArgs(testCase.input);
-
-  const usesList = /\bListNode\b/.test(code);
-  const usesTree = /\bTreeNode\b/.test(code);
-  const definesList = /\b(?:struct|class)\s+ListNode\b/.test(code);
-  const definesTree = /\b(?:struct|class)\s+TreeNode\b/.test(code);
-
-  // Use the student's declared parameter types when the signature parsed and
-  // matches the argument count; otherwise infer each type from its JSON value.
   const useSig = sig !== null && sig.params.length === args.length;
   const decls = args.map((v, i) => {
     const declared = useSig ? sig!.params[i]!.valueType : '';
@@ -108,17 +154,10 @@ export function generateCppProgram(code: string, testCase: TestCase): GeneratedP
     return `  ${a.type} a${i} = ${a.literal};`;
   });
 
-  const argList = args.map((_, i) => `a${i}`).join(', ');
-  const call = entry.className
-    ? `${entry.className}().${entry.name}(${argList})`
-    : `${entry.name}(${argList})`;
-
-  // In-place (void) solutions: run the call, then serialize the mutated
-  // argument (the first non-const reference) as the answer to compare.
-  const isVoid = useSig && sig!.returnType === 'void';
-  const callAndResult = isVoid
-    ? [`  ${call};`, `  string __out = __vds::j(a${voidTargetIndex(sig!)});`]
-    : [`  auto __r = ${call};`, '  string __out = __vds::j(__r);'];
+  const usesList = /\bListNode\b/.test(studentCode);
+  const usesTree = /\bTreeNode\b/.test(studentCode);
+  const definesList = /\b(?:struct|class)\s+ListNode\b/.test(studentCode);
+  const definesTree = /\b(?:struct|class)\s+TreeNode\b/.test(studentCode);
 
   const prelude = [...INCLUDES, '', ...SERIALIZERS_BASE];
   if (usesList && !definesList) prelude.push(LIST_STRUCT);
@@ -126,21 +165,16 @@ export function generateCppProgram(code: string, testCase: TestCase): GeneratedP
 
   const nodeHelpers = [...(usesList ? LIST_HELPERS : []), ...(usesTree ? TREE_HELPERS : [])];
 
-  const main = [
-    'int main(){',
-    ...decls,
-    ...callAndResult,
-    `  cout << "${RESULT_SENTINEL}" << __out << "\\n";`,
-    '  return 0;',
-    '}',
-  ];
+  // Splice the freshly-generated decls in where the marker comment sits, so
+  // an edited call-site (different arg count) still lines up with `a0..an`.
+  const filledSystemCode = systemCode.replace('  // ---- arguments ----', decls.join('\n'));
 
   const lines: string[] = [...prelude, '// ---- student code ----'];
   const studentStart = lines.length + 1;
-  const studentLines = code.replace(/\n+$/, '').split('\n');
+  const studentLines = studentCode.replace(/\n+$/, '').split('\n');
   lines.push(...studentLines);
   const studentEnd = lines.length;
-  lines.push('// ---- harness ----', ...nodeHelpers, ...main);
+  lines.push('// ---- harness ----', ...nodeHelpers, filledSystemCode);
 
   return {
     source: lines.join('\n') + '\n',

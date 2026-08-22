@@ -1,5 +1,5 @@
 import { WALL_CLOCK_MS, type ExecutionTrace, type TestCase } from '@visionds/trace-schema';
-import type { Runner, RunOptions } from '../types';
+import type { Runner, RunInput, RunOptions } from '../types';
 import type { RunRequest, WorkerReply } from './messages';
 
 /** Grace on top of the in-Python wall-clock cap before the worker is killed —
@@ -23,9 +23,9 @@ export class PyodideRunner implements Runner {
     this.indexURL = opts.indexURL ?? '/pyodide/';
   }
 
-  run(code: string, testCase: TestCase, opts?: RunOptions): Promise<ExecutionTrace> {
+  run(input: RunInput, testCase: TestCase, opts?: RunOptions): Promise<ExecutionTrace> {
     // One in-flight run at a time; later calls wait for earlier ones.
-    const result = this.queue.then(() => this.runExclusive(code, testCase, opts));
+    const result = this.queue.then(() => this.runExclusive(input, testCase, opts));
     this.queue = result.catch(() => undefined);
     return result;
   }
@@ -43,7 +43,7 @@ export class PyodideRunner implements Runner {
   }
 
   private runExclusive(
-    code: string,
+    input: RunInput,
     testCase: TestCase,
     opts?: RunOptions,
   ): Promise<ExecutionTrace> {
@@ -65,7 +65,8 @@ export class PyodideRunner implements Runner {
           this.killWorker();
           resolve({
             language: 'python',
-            code,
+            code: input.studentCode,
+            systemCode: input.systemCode,
             testCase,
             steps: [],
             truncated: true,
@@ -105,7 +106,7 @@ export class PyodideRunner implements Runner {
       worker.addEventListener('message', onMessage);
       worker.addEventListener('error', onError);
       opts?.signal?.addEventListener('abort', onAbort);
-      const request: RunRequest = { id, code, testCase, indexURL: this.indexURL };
+      const request: RunRequest = { id, input, testCase, indexURL: this.indexURL };
       worker.postMessage(request);
     });
   }

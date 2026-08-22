@@ -1,5 +1,6 @@
-import type { ExecutionTrace } from '@visionds/trace-schema';
-import { useMemo } from 'react';
+import { buildCallTree, type ExecutionTrace } from '@visionds/trace-schema';
+import { useEffect, useMemo, useState } from 'react';
+import { CallTreeView } from '../components/CallTreeView';
 import { ExplainPanel } from '../components/ExplainPanel';
 import { Stage } from '../components/Stage';
 import { Transport } from '../components/Transport';
@@ -16,12 +17,24 @@ import { useVis } from '../store';
 export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
   const cursor = useVis((s) => s.cursor);
   const explanation = useVis((s) => s.explanation);
+  const [view, setView] = useState<'stage' | 'calls'>('stage');
 
   // behavior-inferred structure shapes (stack/queue), computed once per trace
   const shapes = useMemo<Map<string, StructShape>>(
     () => (trace ? inferShapes(trace) : new Map()),
     [trace],
   );
+
+  // The call tree is derived, not recorded — one pass over the finished trace.
+  // Recursion is what makes it worth showing, so it gates the toggle.
+  const callTree = useMemo(() => (trace ? buildCallTree(trace.steps) : null), [trace]);
+  const recursive = callTree?.recursive ?? [];
+  const hasRecursion = recursive.length > 0;
+
+  // a non-recursive run has no recursion tab to fall back from
+  useEffect(() => {
+    if (!hasRecursion) setView('stage');
+  }, [hasRecursion]);
 
   // subtitle-style narration: latest AI caption at or before the cursor
   const caption = explanation?.annotations.filter((a) => a.stepIndex <= cursor).at(-1);
@@ -50,13 +63,40 @@ export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
     <section className="pane pane-stage frame" aria-label="Visualization">
       <header className="pane-head pane-head-verdict">
         <VerdictBanner />
+        {hasRecursion && (
+          <div className="view-tabs" role="tablist" aria-label="Stage view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'stage'}
+              className={`view-tab${view === 'stage' ? ' active' : ''}`}
+              onClick={() => setView('stage')}
+            >
+              Structures
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'calls'}
+              className={`view-tab${view === 'calls' ? ' active' : ''}`}
+              onClick={() => setView('calls')}
+              title={`recursive: ${recursive.join(', ')}`}
+            >
+              Recursion tree
+            </button>
+          </div>
+        )}
       </header>
 
       {step ? (
         <>
-          <div className="stage-scroll">
-            <Stage step={step} prev={prev} shapes={shapes} />
-          </div>
+          {view === 'calls' && callTree ? (
+            <CallTreeView tree={callTree} />
+          ) : (
+            <div className="stage-scroll">
+              <Stage step={step} prev={prev} shapes={shapes} />
+            </div>
+          )}
           <div className="stage-dock">
             {caption && (
               <div className={`ai-caption${caption.stepIndex === cursor ? ' fresh' : ''}`}>

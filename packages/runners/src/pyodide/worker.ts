@@ -18,12 +18,12 @@ function getPyodide(indexURL: string): Promise<PyodideLike> {
 const post = (reply: WorkerReply) => self.postMessage(reply);
 
 self.onmessage = async (e: MessageEvent<RunRequest>) => {
-  const { id, code, testCase, indexURL } = e.data;
+  const { id, input, testCase, indexURL } = e.data;
   try {
     post({ id, type: 'status', status: 'loading' });
     const py = await getPyodide(indexURL);
     post({ id, type: 'status', status: 'running' });
-    const trace = runCaseInPyodide(py, code, testCase);
+    const trace = runCaseInPyodide(py, input, testCase);
     post({ id, type: 'result', trace });
   } catch (err) {
     post({ id, type: 'error', message: err instanceof Error ? err.message : String(err) });

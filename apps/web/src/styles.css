@@ -954,6 +954,34 @@ button:disabled { opacity: 0.45; cursor: default; }
 .stdout-strip summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .stdout-strip pre { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 
+.system-code {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+.system-code summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.system-code .cm-editor { margin-top: 6px; max-height: 220px; }
+
+.entry-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.entry-picker label { display: flex; align-items: center; gap: 8px; }
+.entry-picker select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 4px);
+  padding: 2px 6px;
+  font-family: inherit;
+}
+
 .empty-note { color: var(--muted); font-size: 13px; }
 .empty-note.big {
   font-size: 15px;
@@ -1375,3 +1403,195 @@ button:disabled { opacity: 0.45; cursor: default; }
 @media (prefers-reduced-motion: reduce) {
   .theme-toggle-knob { transition: none; }
 }
+
+/* ---------- recursion tree ----------
+   Deliberately flat 2D: the structure scenes carry the depth, and a call
+   tree is about shape and order, which read faster without perspective.
+   Nodes are absolutely positioned from a layout computed over the whole
+   run, then revealed as the cursor reaches each call — the tree draws
+   itself as the animation plays instead of arriving finished. */
+
+.view-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-left: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  flex-shrink: 0;
+}
+.view-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 3px 11px;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.view-tab:hover:not(.active) { color: var(--text); }
+.view-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+  font-weight: 600;
+}
+
+.calltree-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.calltree-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  padding: var(--s-5);
+  scroll-padding: var(--s-5);
+}
+.calltree-canvas { position: relative; margin: auto; flex-shrink: 0; }
+
+.calltree-edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.calltree-edge {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+  fill: none;
+}
+.calltree-edge.done { stroke: var(--border); }
+.calltree-edge.current { stroke: var(--accent); stroke-width: 2; }
+/* arrowheads: a marker cannot inherit its line's stroke, so each state gets
+   its own and is filled to match the edge it terminates */
+.calltree-head path { fill: var(--border-strong); }
+.calltree-head.done path { fill: var(--border); }
+.calltree-head.current path { fill: var(--accent); }
+
+/* the node itself: an ellipse, so a short call like `fib(3)` reads as a
+   circle and a longer one stretches to an oval rather than wrapping */
+.calltree-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 10px;
+  background: var(--cell-bg);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.2;
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+  overflow: hidden;
+}
+.calltree-node:hover { border-color: var(--border-strong); }
+/* still on the stack — waiting on its children, so it stays quiet */
+.calltree-node.open { color: var(--muted); }
+.calltree-node.done { background: var(--panel-2); }
+/* the frame executing at the cursor */
+.calltree-node.current {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  box-shadow: var(--glow);
+  color: var(--text);
+}
+.calltree-node.threw { border-color: var(--fail); }
+
+.calltree-call {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.calltree-ret {
+  font-size: 10px;
+  color: var(--pass);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.calltree-node.threw .calltree-ret { color: var(--fail); }
+
+/* selected node — the one whose detail popover is open */
+.calltree-node.selected { border-color: var(--accent); }
+
+/* detail popover — answers "has this call returned yet, at the step I'm on?"
+   Positioned in canvas coordinates so it rides the tree when the pane scrolls;
+   dismissed by any pointerdown that lands outside it and outside a node. */
+.calltree-pop {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  font-size: 11.5px;
+  text-align: left;
+  cursor: default;
+}
+.calltree-pop .pop-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.calltree-pop .pop-label {
+  font-family: var(--font-stamp);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-dim);
+}
+.calltree-pop code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.35;
+  word-break: break-word;
+  max-height: 96px;
+  overflow: auto;
+}
+.calltree-pop .pop-call { color: var(--text); }
+.calltree-pop .pop-value { color: var(--pass); }
+.calltree-pop .pop-none { color: var(--muted); font-style: italic; }
+.calltree-pop .threw .pop-value { color: var(--fail); }
+.pop-jump {
+  margin-top: 1px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+  font-size: 10.5px;
+  color: var(--muted);
+  text-align: left;
+}
+.pop-jump:hover { color: var(--text); border-color: var(--accent); }
+
+.calltree-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-2) var(--s-4);
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-dim);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.calltree-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.calltree-legend .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+}
+.calltree-legend .dot.current { background: var(--accent); border-color: var(--accent); }
+.calltree-legend .dot.open { background: var(--cell-bg); }
+.calltree-legend .dot.done { background: var(--panel-2); border-color: var(--border); }
+.calltree-count { margin-left: auto; }

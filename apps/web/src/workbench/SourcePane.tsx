@@ -2,7 +2,7 @@ import { cpp } from '@codemirror/lang-cpp';
 import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
-import type { TestCase } from '@visionds/trace-schema';
+import type { Entry, TestCase } from '@visionds/trace-schema';
 import { useEffect, useMemo, useRef } from 'react';
 import { activeLineExtension, showActiveLine } from '../editorActiveLine';
 import { editorTheme } from '../editorTheme';
@@ -14,8 +14,15 @@ const LANG_MODE = { cpp, java, python } as const;
 export interface SourcePaneProps {
   language: string;
   code: string;
+  /** The generated, editable wiring (imports/call-site) — collapsed by default. */
+  systemCode: string;
+  /** Entry candidates found at load time; the picker only shows when there's real ambiguity. */
+  candidates: Entry[];
   cases: TestCase[];
   busy: boolean;
+  /** True while the default system code is still being (re)generated — Run
+   * is disabled meanwhile, so it never fires against a stale/empty pairing. */
+  runDisabled: boolean;
   status: string | null;
   error: string | null;
   /** Line to mark during playback; null when idle. */
@@ -25,6 +32,8 @@ export interface SourcePaneProps {
   stale: boolean;
   onLanguage: (id: string) => void;
   onCode: (code: string) => void;
+  onSystemCode: (code: string) => void;
+  onPickEntry: (entry: Entry) => void;
   onCases: (update: (cases: TestCase[]) => TestCase[]) => void;
   onRun: () => void;
   onDemo?: () => void;
@@ -40,8 +49,11 @@ export interface SourcePaneProps {
 export function SourcePane({
   language,
   code,
+  systemCode,
+  candidates,
   cases,
   busy,
+  runDisabled,
   status,
   error,
   activeLine,
@@ -49,6 +61,8 @@ export function SourcePane({
   stale,
   onLanguage,
   onCode,
+  onSystemCode,
+  onPickEntry,
   onCases,
   onRun,
   onDemo,
@@ -101,6 +115,31 @@ export function SourcePane({
           ))}
         </div>
       </header>
+
+      {candidates.length >= 2 && (
+        <div className="entry-picker">
+          <label>
+            <span>Ambiguous entry point — run:</span>
+            <select
+              onChange={(e) => {
+                const picked = candidates[Number(e.target.value)];
+                if (picked) onPickEntry(picked);
+              }}
+            >
+              {candidates.map((c, i) => (
+                <option key={`${c.className ?? ''}.${c.name}`} value={i}>
+                  {c.className ? `${c.className}.${c.name}` : c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      <details className="system-code">
+        <summary>System code (auto-generated, editable)</summary>
+        <CodeMirror value={systemCode} theme="none" extensions={extensions} onChange={onSystemCode} />
+      </details>
 
       {/* The editor takes its height from this flex row, never a percentage of
           a scrolling parent — CodeMirror re-measures on every layout change
@@ -163,8 +202,8 @@ export function SourcePane({
       </div>
 
       <footer className="pane-foot">
-        <button className="run-btn" onClick={onRun} disabled={busy}>
-          {busy ? (status ?? 'Running…') : 'Run & visualize'}
+        <button className="run-btn" onClick={onRun} disabled={busy || runDisabled}>
+          {busy ? (status ?? 'Running…') : runDisabled ? 'Preparing…' : 'Run & visualize'}
         </button>
         {!busy && (
           <span className="run-hint">

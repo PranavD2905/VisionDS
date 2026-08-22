@@ -48,6 +48,11 @@ pnpm workspaces monorepo:
   100 collection items, 200-char strings, depth 3 — injected into the Python
   tracer so all runners share them); `analyze.ts` `inferPointerRoles()` tags
   integer locals that stay in-bounds of an array as pointer chips;
+  `callTree.ts` `buildCallTree()` derives the frame tree from a finished
+  trace (real `call`/`return` events where a runner emits them, `callDepth`
+  transitions where it only emits `line`) and reports which functions were
+  observed calling themselves — mutual recursion included; every step now
+  carries an optional `func` name for it;
   `fixtures/twoSumFail.ts` canned trace for UI work without a runner.
 - `packages/runners` — `Runner` interface + two implementations.
   `PyodideRunner`: a Web Worker boots Pyodide (assets served locally from
@@ -213,7 +218,31 @@ pnpm workspaces monorepo:
   dequeue), dict = keyed landing pads (value block drops onto its key's pad),
   set = honeycomb of hex gems (membership, not order), linked list = chain
   with arrow struts (+ arced cycle tube), tree = hanging mobile of orbs.
-  Scalars stay 2D. Layout: `three/kit.tsx` is the shared machinery (canvas
+  Scalars stay 2D.
+  **The recursion tree is the one deliberately flat view.** When
+  `buildCallTree` finds recursion, the stage header grows a
+  Structures/Recursion tree toggle; `components/CallTreeView.tsx` draws one
+  **oval** per call the program actually made, joined by **downward arrows**
+  from caller to callee — 2D on purpose, since a call tree is about shape and
+  order and reads faster without perspective. A node says only what the call
+  *was* (`fib(3)` — name plus that call's args, never the function body), with
+  the returned value added as a small second line once it comes back; the
+  ellipse widens to fit its label, so short calls read as circles. Arrowheads
+  are per-state SVG markers because a marker cannot inherit its line's stroke. It does not
+  arrive finished: `stage/callTreeLayout.ts` lays out the *whole* run once (so
+  positions never shift under already-drawn nodes), then a frame is revealed
+  at the step it was entered and fills in `→ value` at the step it returned,
+  so the tree draws and unwinds itself as the transport plays or scrubs.
+  Same purity rule as the 3D scenes: the render is a function of the cursor
+  alone, which is also what lets clicking a node open a detail popover beside
+  it answering *for the step on screen*: the full unclipped `f(name=value, …)`
+  and either the returned value or "not yet — still on the stack", plus an
+  explicit jump-to-this-call button (click selects rather than seeks, or the
+  seek would move the cursor and invalidate the question). It dismisses on any
+  pointerdown outside it, on Escape, and when scrubbing back past the call
+  un-draws its node. The live frame auto-pans into view. Capped at
+  `MAX_CALL_NODES`.
+  Layout: `three/kit.tsx` is the shared machinery (canvas
   rig, damp helpers, `Block3D`, labels, chips, plinth, theme colors);
   `linear/field/keyed/graph.tsx` hold the scenes; `three/Stage3D.tsx` is the
   kind→scene registry and the single lazy entry — three.js lives in one
@@ -350,6 +379,16 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   Note for dev: editing `harness.py` needs a **dev-server restart**, not just
   HMR — the worker keeps the old `?raw` import and the run dies with
   "worker crashed".
+- Done & verified (2026-08-22): **recursion tree** — derived call tree in
+  trace-schema (`callTree.ts`), `func` recorded by all three tracers (Python
+  `co_name`, lldb's name trimmed to the bare function, JDI's
+  `method().name()`), and a 2D self-drawing tree view behind a stage toggle
+  that only appears when recursion is actually detected. 7 builder unit tests
+  plus 2 end-to-end Pyodide tests (a live `fib(4)` trace builds the expected
+  9-node tree with correct nesting and return values; two-sum reports no
+  recursion). Typecheck, prod build and all 60 tests pass. **Not yet exercised
+  in a real browser** — the Chrome extension was not connected this session,
+  so the reveal choreography and auto-pan are visually unverified.
 - Not built yet: production sandbox for the trace service, Claude explainer
   option, graph/adjacency visualization. Known minor: bundling supabase-js grew
   the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.

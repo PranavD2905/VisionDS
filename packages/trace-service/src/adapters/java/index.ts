@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { TestCase } from '@visionds/trace-schema';
+import { listJavaEntryCandidates, type Entry, type TestCase } from '@visionds/trace-schema';
 import { CAPS_JSON } from '../../caps';
 import { type LanguageAdapter, type PreparedProgram, TraceUserError } from '../types';
-import { generateJavaProgram } from './harness';
+import { assembleJavaProgram } from './harness';
 
 const TRACER_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'stepper', 'VisionDsTracer.java');
 
@@ -52,8 +52,15 @@ function ensureTracerCompiled(): string {
  */
 export const javaAdapter: LanguageAdapter = {
   language: 'java',
-  prepare(code: string, testCase: TestCase): PreparedProgram {
-    const prog = generateJavaProgram(code, testCase);
+  prepare(studentCode: string, systemCode: string, entry: Entry, testCase: TestCase): PreparedProgram {
+    // The wire-level Entry only carries {name, className}; recover the full
+    // signature (needed to type argument decls) from the current code.
+    const resolved = listJavaEntryCandidates(studentCode).find((c) => c.name === entry.name) ?? {
+      name: entry.name,
+      returnType: 'void',
+      params: [],
+    };
+    const prog = assembleJavaProgram(studentCode, systemCode, resolved, testCase);
     const tracer = ensureTracerCompiled();
 
     const dir = mkdtempSync(join(tmpdir(), 'visionds-java-'));

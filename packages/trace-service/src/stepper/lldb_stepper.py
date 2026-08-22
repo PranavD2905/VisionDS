@@ -264,6 +264,15 @@ def _kind_value(v, state):
 
 # ------------------------------------------------------------------- stepping
 
+
+def _func_name(frame):
+    """Bare function name for the call tree: lldb hands back a full signature
+    (`Solution::dfs(std::vector<int>&, int)`), which is unreadable as a node
+    label."""
+    name = frame.GetFunctionName() or ""
+    return name.split("(")[0].split("::")[-1].strip()
+
+
 def main():
     binary = sys.argv[1]
     student_start = int(sys.argv[2])
@@ -309,6 +318,7 @@ def main():
             "line": line - student_start + 1,  # map back to student-file coords
             "event": event,
             "locals": _snapshot(frame, line),
+            "func": _func_name(frame),
             "stdout": "",
             "callDepth": max(0, thread.GetNumFrames() - base_frames[0]),
         }
