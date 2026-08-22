@@ -1,6 +1,8 @@
 import {
+  dedupeEntries,
   listCppEntryCandidates,
   listJavaEntryCandidates,
+  resolveEntryPick,
   type Entry,
   type TestCase,
 } from '@visionds/trace-schema';
@@ -52,25 +54,6 @@ function listPythonEntryCandidates(code: string): Entry[] {
   return [...funcs, ...methods];
 }
 
-/**
- * Collapse candidates that are the same choice.
- *
- * `Entry` identifies a function by name and class only, so Java overloads
- * (`public int f(int)` and `public int f(String)`) arrive as two entries that
- * are indistinguishable — same label in the dropdown, duplicate React keys,
- * and picking either resolves to the same first match downstream. One option
- * is the honest representation.
- */
-function dedupeEntries(entries: Entry[]): Entry[] {
-  const seen = new Set<string>();
-  return entries.filter((e) => {
-    const id = `${e.className ?? ''}.${e.name}`;
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
-}
-
 /** The default Python call-site, matching harness.py's `default_system_code`. */
 function defaultPythonSystemCode(entry: Entry): string {
   const call = entry.className
@@ -97,9 +80,10 @@ export async function getDefaultSystemCode(
     if (candidates.length === 0) {
       return { systemCode: '', entry: { name: '', className: null }, candidates: [] };
     }
-    const entry =
-      (entryOverride && candidates.find((c) => c.name === entryOverride.name)) ??
-      candidates[candidates.length - 1]!;
+    // Resolve on name *and* class: a free `foo` and `Solution.foo` are two
+    // distinct options, and matching by name alone made the second one
+    // unselectable — the picker regenerated the first and snapped back to it.
+    const entry = resolveEntryPick(candidates, entryOverride) ?? candidates[candidates.length - 1]!;
     return { systemCode: defaultPythonSystemCode(entry), entry, candidates };
   }
 
