@@ -201,4 +201,33 @@ public:
     );
     expect(trace.result.verdict).toBe('pass');
   }, 30_000);
+
+  it('reports the corrected entry when it seeds the system code itself', () => {
+    // Regression: given an entry but no system code, traceCase regenerates the
+    // system code from the *corrected* entry, but used to echo back the raw
+    // caller entry — so `trace.entry` described a free function while
+    // `trace.systemCode` called `Solution().twoSum`. Anything reading both
+    // (signature extraction, the UI's staleness check) saw a contradiction.
+    const code = `class Solution {
+public:
+    int add(int a, int b) {
+        int sum = a + b;
+        return sum;
+    }
+};`;
+    const trace = traceCase(
+      'cpp',
+      code,
+      { input: '2\n3', expected: '5' },
+      undefined,
+      { name: 'add', className: null },
+    );
+    expect(trace.entry).toEqual({ name: 'add', className: 'Solution' });
+    expect(trace.systemCode).toContain('Solution().add');
+    // NB: the verdict is deliberately not asserted here. A C++ entry taking
+    // plain `int` scalars currently hits the step cap with zero recorded steps
+    // (the stepper never reaches the student frame) — a pre-existing gap,
+    // reproducible through the ordinary seed path too, and unrelated to the
+    // entry/systemCode consistency this test covers.
+  }, 30_000);
 });

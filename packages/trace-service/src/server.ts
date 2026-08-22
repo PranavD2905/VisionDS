@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { EntrySchema, TestCaseSchema } from '@visionds/trace-schema';
 import { z } from 'zod';
+import { TraceUserError } from './adapters/types';
 import { getDefaultSystemCode, supportedLanguages, traceCase } from './trace';
 
 const RequestSchema = z.object({
@@ -68,7 +69,18 @@ export function createTraceServer(): Server {
         const seed = getDefaultSystemCode(language, code, entryOverride);
         return json(res, 200, seed);
       } catch (e) {
-        return json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+        // This endpoint is pure string analysis of a submission, and failing is
+        // the *normal* outcome for an ordinary mistake ("no entry point found",
+        // an unsupported language). Reporting those as 500 makes a bad
+        // submission indistinguishable from a broken service; 500 is reserved
+        // for faults that are actually ours.
+        if (e instanceof TraceUserError) {
+          return json(res, 422, { error: e.message, kind: 'submission' });
+        }
+        return json(res, 500, {
+          error: e instanceof Error ? e.message : String(e),
+          kind: 'service',
+        });
       }
     }
 

@@ -343,6 +343,7 @@ export function WorkbenchPage() {
             code={code}
             systemCode={systemCode}
             candidates={candidates}
+          entry={entry}
             cases={cases}
             busy={busy}
             runDisabled={!systemCodeReady}

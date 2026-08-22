@@ -52,6 +52,25 @@ function listPythonEntryCandidates(code: string): Entry[] {
   return [...funcs, ...methods];
 }
 
+/**
+ * Collapse candidates that are the same choice.
+ *
+ * `Entry` identifies a function by name and class only, so Java overloads
+ * (`public int f(int)` and `public int f(String)`) arrive as two entries that
+ * are indistinguishable — same label in the dropdown, duplicate React keys,
+ * and picking either resolves to the same first match downstream. One option
+ * is the honest representation.
+ */
+function dedupeEntries(entries: Entry[]): Entry[] {
+  const seen = new Set<string>();
+  return entries.filter((e) => {
+    const id = `${e.className ?? ''}.${e.name}`;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 /** The default Python call-site, matching harness.py's `default_system_code`. */
 function defaultPythonSystemCode(entry: Entry): string {
   const call = entry.className
@@ -74,7 +93,7 @@ export async function getDefaultSystemCode(
   entryOverride?: Entry,
 ): Promise<{ systemCode: string; entry: Entry; candidates: Entry[] }> {
   if (language === 'python') {
-    const candidates = listPythonEntryCandidates(studentCode);
+    const candidates = dedupeEntries(listPythonEntryCandidates(studentCode));
     if (candidates.length === 0) {
       return { systemCode: '', entry: { name: '', className: null }, candidates: [] };
     }
@@ -88,10 +107,11 @@ export async function getDefaultSystemCode(
   // to run client-side directly via the same trace-schema functions the
   // trace service uses server-side for the real default — only the
   // literal-generation for the call-site text stays server-side.
-  const candidates: Entry[] =
+  const candidates: Entry[] = dedupeEntries(
     language === 'java'
       ? listJavaEntryCandidates(studentCode).map((c) => ({ name: c.name, className: 'Solution' }))
-      : listCppEntryCandidates(studentCode);
+      : listCppEntryCandidates(studentCode),
+  );
 
   const runner = runnerFor(language);
   if (!(runner instanceof ServerRunner)) {

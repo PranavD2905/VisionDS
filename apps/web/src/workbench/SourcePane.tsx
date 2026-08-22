@@ -19,6 +19,8 @@ export interface SourcePaneProps {
   systemCode: string;
   /** Entry candidates found at load time; the picker only shows when there's real ambiguity. */
   candidates: Entry[];
+  /** The entry the current `systemCode` was actually generated for. */
+  entry: Entry | undefined;
   cases: TestCase[];
   busy: boolean;
   /** True while the default system code is still being (re)generated — Run
@@ -58,6 +60,7 @@ export function SourcePane({
   code,
   systemCode,
   candidates,
+  entry,
   cases,
   busy,
   runDisabled,
@@ -99,6 +102,12 @@ export function SourcePane({
     ],
     [language, theme],
   );
+  // -1 while a rescan is in flight and the entry is momentarily unknown; the
+  // select then shows no option rather than silently naming the wrong one.
+  const selectedEntryIndex = entry
+    ? candidates.findIndex((c) => c.name === entry.name && c.className === entry.className)
+    : -1;
+
   const updateCase = (i: number, patch: Partial<TestCase>) =>
     onCases((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
 
@@ -135,14 +144,19 @@ export function SourcePane({
         <div className="entry-picker">
           <label>
             <span>Ambiguous entry point — run:</span>
+            {/* Controlled: an uncontrolled select keeps whatever the DOM last
+                showed, so after a debounced rescan re-renders the candidates it
+                could name a different function than `systemCode` was built
+                for. `entry` is the single source of truth. */}
             <select
+              value={selectedEntryIndex}
               onChange={(e) => {
                 const picked = candidates[Number(e.target.value)];
                 if (picked) onPickEntry(picked);
               }}
             >
               {candidates.map((c, i) => (
-                <option key={`${c.className ?? ''}.${c.name}`} value={i}>
+                <option key={`${i}:${c.className ?? ''}.${c.name}`} value={i}>
                   {c.className ? `${c.className}.${c.name}` : c.name}
                 </option>
               ))}

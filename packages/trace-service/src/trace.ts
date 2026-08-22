@@ -97,9 +97,16 @@ export function traceCase(
       resolvedSystemCode = systemCode!;
       resolvedEntry = entry!;
     } else {
+      // The seed is generated *from* the caller's entry when there is one, so
+      // `seed.entry` is that same choice after the detector has corrected it
+      // (Java, for instance, fills in the `Solution` class the caller left
+      // null). Preferring the raw caller entry here would leave `trace.entry`
+      // describing a different function than `resolvedSystemCode` actually
+      // calls, and the adapters read both — C++ signature extraction would
+      // hunt for a free function while the system code calls `Solution::…`.
       const seed = getDefaultSystemCode(language, code, haveEntry ? entry : undefined);
       resolvedSystemCode = haveSystemCode ? systemCode! : seed.systemCode;
-      resolvedEntry = haveEntry ? entry! : seed.entry;
+      resolvedEntry = seed.entry;
     }
   } catch (e) {
     if (e instanceof TraceUserError) return errorTrace(language, code, testCase, e.message);
