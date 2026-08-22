@@ -1,12 +1,20 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { TestCaseSchema } from '@visionds/trace-schema';
+import { EntrySchema, TestCaseSchema } from '@visionds/trace-schema';
 import { z } from 'zod';
-import { supportedLanguages, traceCase } from './trace';
+import { getDefaultSystemCode, supportedLanguages, traceCase } from './trace';
 
 const RequestSchema = z.object({
   language: z.string(),
   code: z.string(),
+  systemCode: z.string().optional(),
+  entry: EntrySchema.optional(),
   testCase: TestCaseSchema,
+});
+
+const SystemCodeRequestSchema = z.object({
+  language: z.string(),
+  code: z.string(),
+  entryOverride: EntrySchema.optional(),
 });
 
 const CORS = {
@@ -50,6 +58,20 @@ export function createTraceServer(): Server {
     if (req.method === 'GET' && req.url === '/health') {
       return json(res, 200, { ok: true, languages: supportedLanguages() });
     }
+    if (req.method === 'POST' && req.url === '/system-code') {
+      try {
+        const parsed = SystemCodeRequestSchema.safeParse(JSON.parse(await readBody(req)));
+        if (!parsed.success) {
+          return json(res, 400, { error: 'invalid request', detail: parsed.error.message });
+        }
+        const { language, code, entryOverride } = parsed.data;
+        const seed = getDefaultSystemCode(language, code, entryOverride);
+        return json(res, 200, seed);
+      } catch (e) {
+        return json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
     if (req.method !== 'POST' || req.url !== '/trace') {
       return json(res, 404, { error: 'not found' });
     }
@@ -59,8 +81,8 @@ export function createTraceServer(): Server {
       if (!parsed.success) {
         return json(res, 400, { error: 'invalid request', detail: parsed.error.message });
       }
-      const { language, code, testCase } = parsed.data;
-      const trace = traceCase(language, code, testCase);
+      const { language, code, systemCode, entry, testCase } = parsed.data;
+      const trace = traceCase(language, code, testCase, systemCode, entry);
       return json(res, 200, trace);
     } catch (e) {
       // Internal failure (compiler/debugger missing, stepper crash) — distinct

@@ -1,4 +1,4 @@
-import type { TestCase } from '@visionds/trace-schema';
+import type { Entry, TestCase } from '@visionds/trace-schema';
 
 /** How to launch the language's stepper; it prints the raw StepperOutput JSON. */
 export interface StepperCommand {
@@ -16,8 +16,11 @@ export interface PreparedProgram {
 
 export interface LanguageAdapter {
   language: string;
-  /** Compile student code + a testcase harness and return how to step it. */
-  prepare(code: string, testCase: TestCase): PreparedProgram;
+  /**
+   * Compile student code + the (default or student-edited) system code/entry
+   * against a testcase, and return how to step it.
+   */
+  prepare(studentCode: string, systemCode: string, entry: Entry, testCase: TestCase): PreparedProgram;
 }
 
 /**

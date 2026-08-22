@@ -3,13 +3,17 @@ import {
   ExecutionTraceSchema,
   MAX_STEPS,
   WALL_CLOCK_MS,
+  listJavaEntryCandidates,
+  type Entry,
   type ExecutionTrace,
   type JsonValue,
   type TestCase,
   type TraceStep,
 } from '@visionds/trace-schema';
 import { cppAdapter } from './adapters/cpp';
+import { generateDefaultSystemCode as generateDefaultCppSystemCode } from './adapters/cpp/harness';
 import { javaAdapter } from './adapters/java';
+import { generateDefaultJavaSystemCode } from './adapters/java/harness';
 import { type LanguageAdapter, type PreparedProgram, TraceUserError } from './adapters/types';
 import { parseValue } from './parseInput';
 import { valuesEqual } from './verdict';
@@ -33,19 +37,78 @@ export function supportedLanguages(): string[] {
 }
 
 /**
+ * The default system code (imports/decls/call-site) for a language + student
+ * code + testcase — what the UI seeds its collapsed, editable strip with, and
+ * what a dropdown pick of a non-default candidate regenerates against.
+ */
+export function getDefaultSystemCode(
+  language: string,
+  code: string,
+  entryOverride?: Entry,
+): { systemCode: string; entry: Entry } {
+  const lang = language.toLowerCase();
+  if (lang === 'cpp' || lang === 'c++') {
+    // CppEntry is exactly {name, className} — the wire-level Entry shape
+    // already matches, no lookup needed.
+    return generateDefaultCppSystemCode(code, entryOverride ?? undefined);
+  }
+  if (lang === 'java') {
+    // JavaEntry carries returnType/params too (needed to build typed decls);
+    // resolve the wire-level {name, className} pick against the current
+    // code's candidate list to recover the full signature.
+    const resolved = entryOverride
+      ? listJavaEntryCandidates(code).find((c) => c.name === entryOverride.name)
+      : undefined;
+    const seed = generateDefaultJavaSystemCode(code, resolved);
+    return { systemCode: seed.systemCode, entry: { name: seed.entry.name, className: 'Solution' } };
+  }
+  throw new TraceUserError(`unsupported language: ${language}`);
+}
+
+/**
  * Trace one testcase for a server-side language and return a schema-validated
  * ExecutionTrace — the exact contract the Pyodide runner produces, so the UI
  * treats every language identically.
  */
-export function traceCase(language: string, code: string, testCase: TestCase): ExecutionTrace {
+export function traceCase(
+  language: string,
+  code: string,
+  testCase: TestCase,
+  systemCode?: string,
+  entry?: Entry,
+): ExecutionTrace {
   const adapter = ADAPTERS[language.toLowerCase()];
   if (!adapter) {
     return errorTrace(language, code, testCase, `unsupported language: ${language}`);
   }
 
+  // An empty string or a nameless entry means "not really provided" (e.g. the
+  // client hasn't finished generating its default yet) — never let that
+  // silently produce a system-code region with no call in it, which would
+  // compile to a translation unit with no `main()` and fail at *link* time
+  // with a confusing "undefined symbol: _main" instead of a clean error.
+  const haveSystemCode = systemCode !== undefined && systemCode.trim() !== '';
+  const haveEntry = entry !== undefined && entry.name !== '';
+
+  let resolvedSystemCode: string;
+  let resolvedEntry: Entry;
+  try {
+    if (haveSystemCode && haveEntry) {
+      resolvedSystemCode = systemCode!;
+      resolvedEntry = entry!;
+    } else {
+      const seed = getDefaultSystemCode(language, code, haveEntry ? entry : undefined);
+      resolvedSystemCode = haveSystemCode ? systemCode! : seed.systemCode;
+      resolvedEntry = haveEntry ? entry! : seed.entry;
+    }
+  } catch (e) {
+    if (e instanceof TraceUserError) return errorTrace(language, code, testCase, e.message);
+    throw e;
+  }
+
   let prepared;
   try {
-    prepared = adapter.prepare(code, testCase);
+    prepared = adapter.prepare(code, resolvedSystemCode, resolvedEntry, testCase);
   } catch (e) {
     if (e instanceof TraceUserError) return errorTrace(language, code, testCase, e.message);
     throw e;
@@ -53,7 +116,7 @@ export function traceCase(language: string, code: string, testCase: TestCase): E
 
   try {
     const out = runStepper(prepared);
-    return assembleTrace(language, code, testCase, out);
+    return assembleTrace(language, code, testCase, out, resolvedSystemCode, resolvedEntry);
   } finally {
     prepared.cleanup();
   }
@@ -84,6 +147,8 @@ function assembleTrace(
   code: string,
   testCase: TestCase,
   out: StepperOutput,
+  systemCode: string,
+  entry: Entry,
 ): ExecutionTrace {
   const steps: TraceStep[] = [...out.steps];
 
@@ -101,6 +166,7 @@ function assembleTrace(
       line: last.line,
       event: 'return',
       locals: last.locals,
+      func: last.func,
       stdout: last.stdout,
       callDepth: 0,
       returnValue: actual ?? null,
@@ -110,6 +176,8 @@ function assembleTrace(
   const trace: ExecutionTrace = {
     language,
     code,
+    systemCode,
+    entry,
     testCase,
     steps,
     result: buildResult(testCase, steps, out, actual, hasResult),

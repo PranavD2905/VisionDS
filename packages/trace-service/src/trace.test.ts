@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { traceCase } from './trace';
+import { getDefaultSystemCode, traceCase } from './trace';
 
 // A buggy two-sum: returns just one index instead of the pair — a wrong answer,
 // not a crash, so the verdict is `fail` with a divergence step to jump to.
@@ -167,5 +167,38 @@ public:
     expect(trace.result.verdict).toBe('error');
     expect(trace.result.message).toMatch(/error:/);
     expect(trace.steps).toHaveLength(0);
+  }, 30_000);
+
+  it('self-corrects a stale cross-language entry override (className: null) instead of trusting it', () => {
+    // Regression: a client-side race between switching languages and a
+    // debounced rescan could leak a *different* language's already-resolved
+    // entry (e.g. Python's `{name, className: null}`) into a C++ default
+    // system-code request. Trusting it blindly generated `twoSum(a0, a1)`
+    // instead of `Solution().twoSum(a0, a1)` — an undeclared-identifier
+    // compile error, not a clean fail verdict.
+    const code = `class Solution {
+public:
+    vector<int> twoSum(vector<int>& nums, int target) {
+        unordered_map<int,int> seen;
+        for (int i = 0; i < (int)nums.size(); i++) {
+            int need = target - nums[i];
+            if (seen.count(need)) return {seen[need], i};
+            seen[nums[i]] = i;
+        }
+        return {};
+    }
+};`;
+    const seed = getDefaultSystemCode('cpp', code, { name: 'twoSum', className: null });
+    expect(seed.entry.className).toBe('Solution');
+    expect(seed.systemCode).toContain('Solution().twoSum');
+
+    const trace = traceCase(
+      'cpp',
+      code,
+      { input: '[2,7,11,15]\n9', expected: '[0,1]' },
+      seed.systemCode,
+      seed.entry,
+    );
+    expect(trace.result.verdict).toBe('pass');
   }, 30_000);
 });

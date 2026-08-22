@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { TestCase } from '@visionds/trace-schema';
+import type { Entry, TestCase } from '@visionds/trace-schema';
 import { CAPS_JSON } from '../../caps';
 import { type LanguageAdapter, type PreparedProgram, TraceUserError } from '../types';
-import { generateCppProgram } from './harness';
+import { assembleCppProgram } from './harness';
 
 const COMPILER = process.env.VISIONDS_CXX ?? 'clang++';
 const PYTHON = process.env.VISIONDS_PYTHON ?? '/usr/bin/python3';
@@ -26,8 +26,8 @@ function getLldbPythonPath(): string {
  */
 export const cppAdapter: LanguageAdapter = {
   language: 'cpp',
-  prepare(code: string, testCase: TestCase): PreparedProgram {
-    const prog = generateCppProgram(code, testCase);
+  prepare(studentCode: string, systemCode: string, entry: Entry, testCase: TestCase): PreparedProgram {
+    const prog = assembleCppProgram(studentCode, systemCode, entry, testCase);
     const dir = mkdtempSync(join(tmpdir(), 'visionds-cpp-'));
     const srcPath = join(dir, 'main.cpp');
     const binPath = join(dir, 'prog');

@@ -1,5 +1,11 @@
-import { ExecutionTraceSchema, type ExecutionTrace, type TestCase } from '@visionds/trace-schema';
-import type { Runner, RunnerCapabilities, RunOptions } from '../types';
+import {
+  EntrySchema,
+  ExecutionTraceSchema,
+  type Entry,
+  type ExecutionTrace,
+  type TestCase,
+} from '@visionds/trace-schema';
+import type { Runner, RunInput, RunnerCapabilities, RunOptions } from '../types';
 
 export interface ServerRunnerOptions {
   /** Base URL of the trace service, e.g. http://localhost:8787 */
@@ -21,14 +27,20 @@ export class ServerRunner implements Runner {
     this.endpoint = opts.endpoint.replace(/\/$/, '');
   }
 
-  async run(code: string, testCase: TestCase, opts?: RunOptions): Promise<ExecutionTrace> {
+  async run(input: RunInput, testCase: TestCase, opts?: RunOptions): Promise<ExecutionTrace> {
     opts?.onStatus?.('loading');
     let res: Response;
     try {
       res = await fetch(`${this.endpoint}/trace`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: this.capabilities.language, code, testCase }),
+        body: JSON.stringify({
+          language: this.capabilities.language,
+          code: input.studentCode,
+          systemCode: input.systemCode,
+          entry: input.entry,
+          testCase,
+        }),
         signal: opts?.signal,
       });
     } catch (e) {
@@ -45,5 +57,33 @@ export class ServerRunner implements Runner {
       throw new Error(`Trace service error (${res.status}): ${detail.slice(0, 300)}`);
     }
     return ExecutionTraceSchema.parse(await res.json());
+  }
+
+  /**
+   * Fetch the default system code (imports/decls/call-site) for the current
+   * student code + testcase, optionally targeting a specific entry candidate
+   * (e.g. a dropdown pick). Used by the UI to seed/regenerate the collapsed,
+   * editable system-code strip without duplicating trace-service's
+   * literal-generation logic into the browser bundle.
+   */
+  async fetchDefaultSystemCode(
+    studentCode: string,
+    entryOverride?: Entry,
+  ): Promise<{ systemCode: string; entry: Entry }> {
+    const res = await fetch(`${this.endpoint}/system-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        language: this.capabilities.language,
+        code: studentCode,
+        entryOverride,
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Trace service error (${res.status}): ${detail.slice(0, 300)}`);
+    }
+    const body = (await res.json()) as { systemCode: string; entry: unknown };
+    return { systemCode: body.systemCode, entry: EntrySchema.parse(body.entry) };
   }
 }

@@ -2,8 +2,9 @@ import { cpp } from '@codemirror/lang-cpp';
 import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
-import type { TestCase } from '@visionds/trace-schema';
+import type { Entry, TestCase } from '@visionds/trace-schema';
 import { useEffect, useMemo, useRef } from 'react';
+import { Splitter } from '../components/Splitter';
 import { activeLineExtension, showActiveLine } from '../editorActiveLine';
 import { editorTheme } from '../editorTheme';
 import { LANGUAGES, langById } from '../languages';
@@ -14,8 +15,15 @@ const LANG_MODE = { cpp, java, python } as const;
 export interface SourcePaneProps {
   language: string;
   code: string;
+  /** The generated, editable wiring (imports/call-site) — collapsed by default. */
+  systemCode: string;
+  /** Entry candidates found at load time; the picker only shows when there's real ambiguity. */
+  candidates: Entry[];
   cases: TestCase[];
   busy: boolean;
+  /** True while the default system code is still being (re)generated — Run
+   * is disabled meanwhile, so it never fires against a stale/empty pairing. */
+  runDisabled: boolean;
   status: string | null;
   error: string | null;
   /** Line to mark during playback; null when idle. */
@@ -23,8 +31,16 @@ export interface SourcePaneProps {
   activeLineIsException: boolean;
   /** True when the editor no longer matches the code that produced the trace. */
   stale: boolean;
+  /** Fraction of the pane given to the editor; the testcases take the rest. */
+  editorSplit: number;
+  onEditorSplit: (value: number) => void;
+  /** Region visibility, driven by the app-bar toggles. */
+  codeOpen: boolean;
+  casesOpen: boolean;
   onLanguage: (id: string) => void;
   onCode: (code: string) => void;
+  onSystemCode: (code: string) => void;
+  onPickEntry: (entry: Entry) => void;
   onCases: (update: (cases: TestCase[]) => TestCase[]) => void;
   onRun: () => void;
   onDemo?: () => void;
@@ -40,20 +56,30 @@ export interface SourcePaneProps {
 export function SourcePane({
   language,
   code,
+  systemCode,
+  candidates,
   cases,
   busy,
+  runDisabled,
   status,
   error,
   activeLine,
   activeLineIsException,
   stale,
+  editorSplit,
+  onEditorSplit,
+  codeOpen,
+  casesOpen,
   onLanguage,
   onCode,
+  onSystemCode,
+  onPickEntry,
   onCases,
   onRun,
   onDemo,
 }: SourcePaneProps) {
   const editor = useRef<ReactCodeMirrorRef>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     showActiveLine(editor.current?.view, {
@@ -102,69 +128,134 @@ export function SourcePane({
         </div>
       </header>
 
-      {/* The editor takes its height from this flex row, never a percentage of
-          a scrolling parent — CodeMirror re-measures on every layout change
-          and a percentage inside an auto-height ancestor loops forever. */}
-      <div className="editor-holder">
-        <CodeMirror
-          ref={editor}
-          value={code}
-          theme="none"
-          extensions={extensions}
-          onChange={onCode}
-        />
-      </div>
-      {stale && (
-        <p className="stale-note">
-          Edited since this run — the diagram still shows the previous execution.
-        </p>
+      {/* The entry picker and the system-code strip are code UI too — a second
+          CodeMirror left on screen is why hiding "the code" never looked like
+          it had worked. They collapse with the editor. */}
+      {codeOpen && candidates.length >= 2 && (
+        <div className="entry-picker">
+          <label>
+            <span>Ambiguous entry point — run:</span>
+            <select
+              onChange={(e) => {
+                const picked = candidates[Number(e.target.value)];
+                if (picked) onPickEntry(picked);
+              }}
+            >
+              {candidates.map((c, i) => (
+                <option key={`${c.className ?? ''}.${c.name}`} value={i}>
+                  {c.className ? `${c.className}.${c.name}` : c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
 
-      <div className="pane-scroll">
-        <div className="cases">
-          <div className="cases-head">
-            <span className="pane-title">Testcases</span>
-            <span className="cases-hint">one argument per line</span>
+      {codeOpen && (
+        <details className="system-code">
+          <summary>System code (auto-generated, editable)</summary>
+          <CodeMirror
+            value={systemCode}
+            theme="none"
+            extensions={extensions}
+            onChange={onSystemCode}
+          />
+        </details>
+      )}
+
+      {/* Editor and testcases share this region, split by the drag handle.
+          The editor takes its height from the grid row, never a percentage of
+          a scrolling parent — CodeMirror re-measures on every layout change
+          and a percentage inside an auto-height ancestor loops forever. */}
+      {/* Region visibility drives the row template: with one side collapsed
+          the survivor takes the whole pane, and the drag handle goes away
+          because there is no longer a boundary to move. */}
+      <div
+        className={`source-split${codeOpen && casesOpen ? '' : ' single'}`}
+        ref={splitRef}
+        style={{ ['--editor-split' as string]: editorSplit }}
+      >
+        {/* editor + its stale note are one grid row, so the row count stays
+            fixed whether or not the note is showing */}
+        {codeOpen && (
+          <div className="editor-region">
+            <div className="editor-holder">
+              <CodeMirror
+                ref={editor}
+                value={code}
+                theme="none"
+                extensions={extensions}
+                onChange={onCode}
+              />
+            </div>
+            {stale && (
+              <p className="stale-note">
+                Edited since this run — the diagram still shows the previous execution.
+              </p>
+            )}
           </div>
-          {cases.map((c, i) => (
-            <div className="case-row" key={i}>
-              <label>
-                <span>Input</span>
-                <textarea
-                  value={c.input}
-                  rows={2}
-                  onChange={(e) => updateCase(i, { input: e.target.value })}
-                />
-              </label>
-              <label>
-                <span>Expected</span>
-                <input
-                  value={c.expected}
-                  onChange={(e) => updateCase(i, { expected: e.target.value })}
-                />
-              </label>
+        )}
+
+        {codeOpen && casesOpen && (
+          <Splitter
+            orientation="horizontal"
+            value={editorSplit}
+            onChange={onEditorSplit}
+            containerRef={splitRef}
+            min={0.2}
+            max={0.85}
+            label="Resize editor and testcases"
+          />
+        )}
+
+        {casesOpen && (
+          <div className="pane-scroll">
+            <div className="cases">
+              <div className="cases-head">
+                <span className="pane-title">Testcases</span>
+                <span className="cases-hint">one argument per line</span>
+              </div>
+              {cases.map((c, i) => (
+                <div className="case-row" key={i}>
+                  <label>
+                    <span>Input</span>
+                    <textarea
+                      value={c.input}
+                      rows={2}
+                      onChange={(e) => updateCase(i, { input: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>Expected</span>
+                    <input
+                      value={c.expected}
+                      onChange={(e) => updateCase(i, { expected: e.target.value })}
+                    />
+                  </label>
+                  <button
+                    className="remove-case"
+                    onClick={() => onCases((cs) => cs.filter((_, j) => j !== i))}
+                    disabled={cases.length === 1}
+                    aria-label="remove testcase"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
               <button
-                className="remove-case"
-                onClick={() => onCases((cs) => cs.filter((_, j) => j !== i))}
-                disabled={cases.length === 1}
-                aria-label="remove testcase"
+                className="add-case"
+                onClick={() => onCases((cs) => [...cs, { input: '', expected: '' }])}
               >
-                ✕
+                + Add testcase
               </button>
             </div>
-          ))}
-          <button
-            className="add-case"
-            onClick={() => onCases((cs) => [...cs, { input: '', expected: '' }])}
-          >
-            + Add testcase
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
       <footer className="pane-foot">
-        <button className="run-btn" onClick={onRun} disabled={busy}>
-          {busy ? (status ?? 'Running…') : 'Run & visualize'}
+        <button className="run-btn" onClick={onRun} disabled={busy || runDisabled}>
+          {busy ? (status ?? 'Running…') : runDisabled ? 'Preparing…' : 'Run & visualize'}
         </button>
         {!busy && (
           <span className="run-hint">

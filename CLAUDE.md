@@ -48,6 +48,11 @@ pnpm workspaces monorepo:
   100 collection items, 200-char strings, depth 3 — injected into the Python
   tracer so all runners share them); `analyze.ts` `inferPointerRoles()` tags
   integer locals that stay in-bounds of an array as pointer chips;
+  `callTree.ts` `buildCallTree()` derives the frame tree from a finished
+  trace (real `call`/`return` events where a runner emits them, `callDepth`
+  transitions where it only emits `line`) and reports which functions were
+  observed calling themselves — mutual recursion included; every step now
+  carries an optional `func` name for it;
   `fixtures/twoSumFail.ts` canned trace for UI work without a runner.
 - `packages/runners` — `Runner` interface + two implementations.
   `PyodideRunner`: a Web Worker boots Pyodide (assets served locally from
@@ -55,7 +60,11 @@ pnpm workspaces monorepo:
   under `harness.py`'s `sys.settrace` tracer: LeetCode-style input parsing
   (one arg per line, `name = literal` accepted; entry point = last top-level
   def, else last public method of `class Solution`), capped locals snapshots,
-  stdout capture, verdict + divergence detection. A JS-side watchdog
+  stdout capture, verdict + divergence detection. Node-shaped objects are
+  **duck-typed, never name-matched** — `val`+`left`+`right` → `tree`,
+  `val`+`next` → `linkedlist` — so a student's own class name works; the walks
+  are identity-tracked (a cyclic list reports `cyclesTo`) and item-capped.
+  A JS-side watchdog
   (cap + 10s) terminates the worker for loops Python can't interrupt →
   clean `timeout` verdict, never a frozen tab. `ServerRunner`: POSTs
   `{language, code, testCase}` to the trace service and schema-validates the
@@ -182,15 +191,47 @@ pnpm workspaces monorepo:
   **The workbench** (`src/workbench/`) is a two-pane split: `SourcePane`
   (language, editor, testcases, run) and `StagePane` (verdict, diagrams,
   narration, transport), with `useRun` holding the run flow and `WorkbenchPage`
-  owning only the source state. There is **one copy of your code on screen**:
+  owning only the source state. That state is mirrored to localStorage by
+  `workbench/draft.ts` and restored as the initial state, so a refresh keeps
+  the student's code, testcases, language and system-code strip instead of
+  resetting to the two-sum starter; `#import=`, history re-open and extension
+  captures still win, since they `load()` from effects that run after initial
+  state is set. `readDraft` never throws — blocked storage, corrupt JSON, an
+  empty draft or an unknown language id all fall back to the starter.
+  There is **one copy of your code on screen**:
   the editor stays editable and marks the current step in place via
   `editorActiveLine.ts` (a CodeMirror decoration, so it tracks real line
   geometry). Editing after a run shows a "stale" note rather than pretending
-  the diagram still matches. Two layout rules matter: the editor must take a
-  *definite* height from its flex parent (a percentage height inside an
-  auto-height scroll parent puts CodeMirror's measure cycle into an infinite
-  loop that hangs the tab), and each pane scrolls internally so the page never
-  does.
+  the diagram still matches.
+  Either source region can also be **collapsed** from VS-Code-style toggles in
+  the app bar beside the theme switch (`components/PaneToggles.tsx`): the icon
+  is a miniature of the window with a band where that region actually sits
+  (code = the left column, testcases = the bottom strip — VS Code's side-bar
+  and panel icons), solid when showing. Collapsing the code takes the entry
+  picker and the system-code strip with it: both are code UI, and leaving a
+  second CodeMirror on screen made "hide the code" look broken. Collapsing one gives
+  the pane to the other and drops the drag handle (no boundary left to move);
+  collapsing both unmounts the source pane entirely so the stage takes the
+  whole window, and **Run moves into the app bar** — hiding the editor must
+  never cost the ability to run (⌘/Ctrl+Enter works either way, being a
+  window listener). The flags live in
+  `layout.ts` beside the split fractions, and only an explicit `false`
+  collapses — a missing flag must never hide a region nobody chose to hide.
+  Both splits are **drag-resizable** (`components/Splitter.tsx`, a
+  pointer-capture `separator` that is also arrow-key operable and
+  double-click-centres): source↔stage and, inside the source pane,
+  editor↔testcases. Positions are stored as *fractions* — so proportions
+  survive a window resize — driven into CSS as `--split` / `--editor-split`
+  grid tracks and persisted by `workbench/layout.ts`. The stage measures
+  itself (`stage/StageSize.tsx`, ResizeObserver) and publishes its box through
+  context; `Maybe3D`'s `fitSpec` clamps every scene's *preferred* size to the
+  room actually available, shrinking to fit and growing into spare space up to
+  1.5× (unbounded growth would let one structure swallow a stage holding
+  several). Two layout rules matter: the editor must take a *definite* height
+  from its parent — the grid row supplies it now — since a percentage height
+  inside an auto-height scroll parent puts CodeMirror's measure cycle into an
+  infinite loop that hangs the tab; and each pane scrolls internally so the
+  page never does.
   Marketing pages share `components/site/SiteChrome.tsx` (nav + footer) and
   `Reveal.tsx` (IntersectionObserver scroll reveal); marketing CSS is
   `src/site.css`, which also defines the `.frame` the workbench reuses.
@@ -209,7 +250,31 @@ pnpm workspaces monorepo:
   dequeue), dict = keyed landing pads (value block drops onto its key's pad),
   set = honeycomb of hex gems (membership, not order), linked list = chain
   with arrow struts (+ arced cycle tube), tree = hanging mobile of orbs.
-  Scalars stay 2D. Layout: `three/kit.tsx` is the shared machinery (canvas
+  Scalars stay 2D.
+  **The recursion tree is the one deliberately flat view.** When
+  `buildCallTree` finds recursion, the stage header grows a
+  Structures/Recursion tree toggle; `components/CallTreeView.tsx` draws one
+  **oval** per call the program actually made, joined by **downward arrows**
+  from caller to callee — 2D on purpose, since a call tree is about shape and
+  order and reads faster without perspective. A node says only what the call
+  *was* (`fib(3)` — name plus that call's args, never the function body), with
+  the returned value added as a small second line once it comes back; the
+  ellipse widens to fit its label, so short calls read as circles. Arrowheads
+  are per-state SVG markers because a marker cannot inherit its line's stroke. It does not
+  arrive finished: `stage/callTreeLayout.ts` lays out the *whole* run once (so
+  positions never shift under already-drawn nodes), then a frame is revealed
+  at the step it was entered and fills in `→ value` at the step it returned,
+  so the tree draws and unwinds itself as the transport plays or scrubs.
+  Same purity rule as the 3D scenes: the render is a function of the cursor
+  alone, which is also what lets clicking a node open a detail popover beside
+  it answering *for the step on screen*: the full unclipped `f(name=value, …)`
+  and either the returned value or "not yet — still on the stack", plus an
+  explicit jump-to-this-call button (click selects rather than seeks, or the
+  seek would move the cursor and invalidate the question). It dismisses on any
+  pointerdown outside it, on Escape, and when scrubbing back past the call
+  un-draws its node. The live frame auto-pans into view. Capped at
+  `MAX_CALL_NODES`.
+  Layout: `three/kit.tsx` is the shared machinery (canvas
   rig, damp helpers, `Block3D`, labels, chips, plinth, theme colors);
   `linear/field/keyed/graph.tsx` hold the scenes; `three/Stage3D.tsx` is the
   kind→scene registry and the single lazy entry — three.js lives in one
@@ -334,10 +399,28 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   (drop-in push, `top` tag), queue conveyor (rear entry, forward glide on
   dequeue, ← out/in ← floor marks), dict pads (height-coded values, key
   labels), set honeycomb gems, and both matrices of a Min Path Sum run
-  (height-field filling in). Linked-list chain and tree mobile are
-  code-complete and typechecked but not yet exercised in a browser (needs a
-  ListNode/TreeNode-producing run). Same automation caveat as before: rAF is
+  (height-field filling in). Same automation caveat as before: rAF is
   throttled in the driven window, so only settled states were verified.
+- Done & verified (2026-08-06): **Python tracer emits `tree`/`linkedlist`
+  kinds**, which is what the chain and mobile scenes were waiting on — before
+  this, node objects fell through to `repr` and showed as
+  `<__main__.TreeNode object at 0x…>` on stage. Browser-verified: a BST-insert
+  run draws the mobile (root 5 over 3/8 over 1/4), and a list reversal draws
+  three chains mid-flight (`prev` 3→2→1 reversed, `curr` 4→5 remaining,
+  `head` 1→∅). 3 new harness tests cover chain, cycle (`cyclesTo`), and tree.
+  Note for dev: editing `harness.py` needs a **dev-server restart**, not just
+  HMR — the worker keeps the old `?raw` import and the run dies with
+  "worker crashed".
+- Done & verified (2026-08-22): **recursion tree** — derived call tree in
+  trace-schema (`callTree.ts`), `func` recorded by all three tracers (Python
+  `co_name`, lldb's name trimmed to the bare function, JDI's
+  `method().name()`), and a 2D self-drawing tree view behind a stage toggle
+  that only appears when recursion is actually detected. 7 builder unit tests
+  plus 2 end-to-end Pyodide tests (a live `fib(4)` trace builds the expected
+  9-node tree with correct nesting and return values; two-sum reports no
+  recursion). Typecheck, prod build and all 60 tests pass. **Not yet exercised
+  in a real browser** — the Chrome extension was not connected this session,
+  so the reveal choreography and auto-pan are visually unverified.
 - Not built yet: production sandbox for the trace service, Claude explainer
   option, graph/adjacency visualization. Known minor: bundling supabase-js grew
   the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.

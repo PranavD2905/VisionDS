@@ -55,6 +55,12 @@ export const TraceStepSchema = z.object({
   line: z.number().int().positive(),
   event: TraceEventSchema,
   locals: z.array(VarSnapshotSchema),
+  /**
+   * Name of the function whose frame this step belongs to. Optional because
+   * traces recorded before this field existed have none; the call-tree
+   * builder falls back to positional frame labels when it is absent.
+   */
+  func: z.string().optional(),
   /** stdout produced up to and including this step. */
   stdout: z.string(),
   callDepth: z.number().int().nonnegative(),
@@ -87,9 +93,23 @@ export const TestCaseResultSchema = z.object({
 });
 export type TestCaseResult = z.infer<typeof TestCaseResultSchema>;
 
+export const EntrySchema = z.object({
+  name: z.string(),
+  className: z.string().nullable(),
+});
+export type Entry = z.infer<typeof EntrySchema>;
+
 export const ExecutionTraceSchema = z.object({
   language: z.string(),
   code: z.string(),
+  /**
+   * The generated wiring code (imports + call-site) actually used for this
+   * run, echoed back so the UI can detect staleness against edits. Absent
+   * from traces produced before this field existed.
+   */
+  systemCode: z.string().optional(),
+  /** Which function/method the run actually targeted. */
+  entry: EntrySchema.optional(),
   testCase: TestCaseSchema,
   steps: z.array(TraceStepSchema),
   result: TestCaseResultSchema,

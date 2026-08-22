@@ -115,6 +115,7 @@ public class VisionDsTracer {
             int line = f.location().lineNumber() - studentStart + 1;
             int depth = Math.max(0, t.frameCount() - baseFrames);
             sb.append("\"index\":0,\"line\":").append(line).append(",\"event\":\"line\",\"callDepth\":").append(depth);
+            sb.append(",\"func\":").append(jsonStr(f.location().method().name()));
             sb.append(",\"stdout\":\"\",\"locals\":[");
             boolean first = true;
             Set<String> seen = new HashSet<>();

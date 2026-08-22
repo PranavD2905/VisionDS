@@ -15,6 +15,7 @@ from collections import deque
 from contextlib import redirect_stdout
 
 STUDENT_FILE = "<student>"
+SYSTEM_FILE = "<system>"
 MAX_STDOUT = 4_000
 
 # Overwritten from trace-schema caps by run_case; defaults are a safety net.
@@ -59,28 +60,69 @@ def _parse_args(input_str):
     return args
 
 
-def _find_entry(tree):
-    """Last top-level def; else the last public method of `class Solution`."""
+def _list_entry_candidates(tree):
+    """Every plausible entry candidate, in source order: top-level defs first,
+    then public methods of `class Solution` — the full set an ambiguous
+    submission could mean, not just the default pick."""
+    candidates = []
     funcs = [
         n for n in tree.body
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
-    if funcs:
-        return funcs[-1].name, None
+    candidates.extend((f.name, None) for f in funcs)
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "Solution":
             methods = [
                 m for m in node.body
                 if isinstance(m, ast.FunctionDef) and not m.name.startswith("_")
             ]
-            if methods:
-                return methods[-1].name, node.name
+            candidates.extend((m.name, node.name) for m in methods)
+    return candidates
+
+
+def _find_entry(tree):
+    """Last top-level def; else the last public method of `class Solution`."""
+    funcs = [c for c in _list_entry_candidates(tree) if c[1] is None]
+    if funcs:
+        return funcs[-1]
+    methods = [c for c in _list_entry_candidates(tree) if c[1] is not None]
+    if methods:
+        return methods[-1]
     raise ValueError(
         "no entry point found: define a top-level function or a Solution class"
     )
 
 
+def list_entry_candidates(code):
+    """JSON-serializable candidate list, for the UI's ambiguity dropdown."""
+    tree = ast.parse(code)
+    return json.dumps([
+        {"name": name, "className": class_name}
+        for name, class_name in _list_entry_candidates(tree)
+    ])
+
+
 # ----------------------------------------------------------- serialization
+
+_BUILTIN_VALUES = (str, bytes, int, float, bool, list, tuple, dict, set, frozenset, deque)
+
+
+def _is_tree_node(v):
+    """Duck-typed TreeNode: `val` + `left` + `right` (LeetCode convention)."""
+    return (
+        not isinstance(v, _BUILTIN_VALUES)
+        and hasattr(v, "val") and hasattr(v, "left") and hasattr(v, "right")
+    )
+
+
+def _is_list_node(v):
+    """Duck-typed ListNode: `val` + `next` (and not a tree node)."""
+    return (
+        not isinstance(v, _BUILTIN_VALUES)
+        and hasattr(v, "val") and hasattr(v, "next")
+        and not (hasattr(v, "left") and hasattr(v, "right"))
+    )
+
 
 def _kind_of(v):
     if isinstance(v, str):
@@ -96,6 +138,10 @@ def _kind_of(v):
         return "dict"
     if isinstance(v, (set, frozenset)):
         return "set"
+    if _is_tree_node(v):
+        return "tree"
+    if _is_list_node(v):
+        return "linkedlist"
     return "scalar"
 
 
@@ -152,7 +198,55 @@ def _convert(v, depth, state):
             state["truncated"] = True
             out.append("…")
         return out
+    if _is_tree_node(v):
+        return _convert_tree(v, state)
+    if _is_list_node(v):
+        return _convert_list(v, state)
     return _short_repr(v, state)
+
+
+def _convert_list(head, state):
+    """Walk a ListNode chain into {vals, cyclesTo} (the linkedlist shape the
+    C++/Java steppers emit). `cyclesTo` is the index the tail loops back to,
+    or None; the walk is capped and cycle-safe by construction."""
+    vals = []
+    seen = {}
+    cycles_to = None
+    node = head
+    while node is not None:
+        if id(node) in seen:
+            cycles_to = seen[id(node)]
+            break
+        if len(vals) >= MAX_COLLECTION_ITEMS:
+            state["truncated"] = True
+            break
+        seen[id(node)] = len(vals)
+        vals.append(_convert(getattr(node, "val", None), MAX_DEPTH - 1, state))
+        node = getattr(node, "next", None)
+    return {"vals": vals, "cyclesTo": cycles_to}
+
+
+def _convert_tree(root, state):
+    """Walk a TreeNode into nested {val, left, right}, capped by total node
+    count and guarded against malformed (cyclic) trees."""
+    budget = [MAX_COLLECTION_ITEMS]
+    seen = set()
+
+    def walk(node, depth):
+        if node is None:
+            return None
+        if id(node) in seen or budget[0] <= 0 or depth > 32:
+            state["truncated"] = True
+            return None
+        seen.add(id(node))
+        budget[0] -= 1
+        return {
+            "val": _convert(getattr(node, "val", None), MAX_DEPTH - 1, state),
+            "left": walk(getattr(node, "left", None), depth + 1),
+            "right": walk(getattr(node, "right", None), depth + 1),
+        }
+
+    return walk(root, 0)
 
 
 _SKIP_TYPES = (
@@ -214,6 +308,7 @@ class _Tracer:
             "line": frame.f_lineno,
             "event": event,
             "locals": _snapshot_locals(frame.f_locals),
+            "func": frame.f_code.co_name,
             "stdout": self._stdout(),
             "callDepth": self.depth,
         }
@@ -256,7 +351,20 @@ def _norm(v):
 
 # -------------------------------------------------------------- entry point
 
-def run_case(code, input_str, expected_str, caps_json):
+def default_system_code(entry_name, class_name):
+    """The student-visible/editable call-site: imports (none needed by
+    default) + a call into the detected entry, built from parsed args.
+    `class_name` is an empty string (not None) when there is no class — JS
+    `null` crossing the Pyodide FFI as a bare argument doesn't reliably
+    become Python `None`."""
+    if not class_name:
+        call = "%s(*__vds_args__)" % entry_name
+    else:
+        call = "%s().%s(*__vds_args__)" % (class_name, entry_name)
+    return "result = %s" % call
+
+
+def run_case(system_code, student_code, input_str, expected_str, caps_json):
     caps = json.loads(caps_json)
     for name in (
         "MAX_STEPS", "MAX_COLLECTION_ITEMS", "MAX_STRING_LEN",
@@ -268,7 +376,8 @@ def run_case(code, input_str, expected_str, caps_json):
     result = {"input": input_str, "expected": expected_str}
     trace = {
         "language": "python",
-        "code": code,
+        "code": student_code,
+        "systemCode": system_code,
         "testCase": {"input": input_str, "expected": expected_str},
         "steps": [],
         "result": result,
@@ -280,11 +389,10 @@ def run_case(code, input_str, expected_str, caps_json):
         return json.dumps(trace)
 
     try:
-        tree = ast.parse(code)
+        ast.parse(student_code)
     except SyntaxError as e:
         return finish("error", message="SyntaxError: %s" % e)
     try:
-        entry_name, class_name = _find_entry(tree)
         args = _parse_args(input_str)
         expected = _parse_value(expected_str)
     except ValueError as e:
@@ -292,24 +400,27 @@ def run_case(code, input_str, expected_str, caps_json):
 
     g = {"__name__": "__main__"}
     try:
-        exec(compile(code, STUDENT_FILE, "exec"), g)
-        if class_name is None:
-            fn = g[entry_name]
-        else:
-            fn = getattr(g[class_name](), entry_name)
+        exec(compile(student_code, STUDENT_FILE, "exec"), g)
     except BaseException as e:
         return finish(
             "error", message="%s while loading code: %s" % (type(e).__name__, e)
         )
+
+    g["__vds_args__"] = args
 
     buf = io.StringIO()
     tracer = _Tracer(buf)
     exc = None
     ret = None
     with redirect_stdout(buf):
+        try:
+            call_code = compile(system_code, SYSTEM_FILE, "exec")
+        except SyntaxError as e:
+            return finish("error", message="error in generated call: SyntaxError: %s" % e)
         sys.settrace(tracer)
         try:
-            ret = fn(*args)
+            exec(call_code, g)
+            ret = g.get("result")
         except _Limit as e:
             tracer.limit = tracer.limit or e.kind
         except BaseException as e:
@@ -317,6 +428,10 @@ def run_case(code, input_str, expected_str, caps_json):
         finally:
             sys.settrace(None)
 
+    # No student frame ever ran before the failure — the call-site itself is
+    # broken (e.g. a typo'd function/method name after editing it), not the
+    # student's actual logic.
+    call_site_broken = exc is not None and tracer.limit is None and not tracer.steps
     trace["steps"] = tracer.steps
     steps = tracer.steps
 
@@ -333,7 +448,8 @@ def run_case(code, input_str, expected_str, caps_json):
         return finish("timeout", message=reason, **kw)
 
     if exc is not None:
-        kw = {"message": "%s: %s" % (type(exc).__name__, exc)}
+        prefix = "error in generated call: " if call_site_broken else ""
+        kw = {"message": "%s%s: %s" % (prefix, type(exc).__name__, exc)}
         exc_name = type(exc).__name__
         div = None
         for step in steps:

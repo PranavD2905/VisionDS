@@ -1,14 +1,16 @@
 import { saveRun } from '@visionds/auth';
-import type { ExecutionTrace, TestCase } from '@visionds/trace-schema';
+import type { Entry, ExecutionTrace, TestCase } from '@visionds/trace-schema';
 import { useState } from 'react';
 import type { ImportProblem } from '../lib/import';
 import { runnerFor } from '../runner';
 import { useVis } from '../store';
 import type { AuthClient } from './types';
 
-interface RunInput {
+interface RunArgs {
   language: string;
   code: string;
+  systemCode: string;
+  entry?: Entry;
   cases: TestCase[];
   problem: ImportProblem | null;
 }
@@ -27,7 +29,7 @@ export function useRun(client: AuthClient, signedIn: boolean) {
   const [error, setError] = useState<string | null>(null);
 
   /** Best-effort history write — a failed save never blocks the animation. */
-  const persist = (input: RunInput, traces: ExecutionTrace[]) => {
+  const persist = (input: RunArgs, traces: ExecutionTrace[]) => {
     if (!client || !signedIn) return;
     const shown = traces.find((t) => t.result.verdict !== 'pass') ?? traces[0];
     void saveRun(client, {
@@ -45,7 +47,7 @@ export function useRun(client: AuthClient, signedIn: boolean) {
     setTraces(traces, failing === -1 ? 0 : failing);
   };
 
-  const run = async (input: RunInput) => {
+  const run = async (input: RunArgs) => {
     setBusy(true);
     setError(null);
     try {
@@ -54,16 +56,20 @@ export function useRun(client: AuthClient, signedIn: boolean) {
       for (let i = 0; i < input.cases.length; i++) {
         setStatus(`Testcase ${i + 1} of ${input.cases.length}…`);
         traces.push(
-          await runner.run(input.code, input.cases[i]!, {
-            onStatus: (s) =>
-              setStatus(
-                s === 'loading'
-                  ? runner.capabilities.runsIn === 'server'
-                    ? 'Compiling & tracing on the server…'
-                    : 'Loading Python runtime (first run only)…'
-                  : `Running testcase ${i + 1} of ${input.cases.length}…`,
-              ),
-          }),
+          await runner.run(
+            { studentCode: input.code, systemCode: input.systemCode, entry: input.entry },
+            input.cases[i]!,
+            {
+              onStatus: (s) =>
+                setStatus(
+                  s === 'loading'
+                    ? runner.capabilities.runsIn === 'server'
+                      ? 'Compiling & tracing on the server…'
+                      : 'Loading Python runtime (first run only)…'
+                    : `Running testcase ${i + 1} of ${input.cases.length}…`,
+                ),
+            },
+          ),
         );
       }
       persist(input, traces);
