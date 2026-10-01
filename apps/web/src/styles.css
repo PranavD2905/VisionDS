@@ -528,11 +528,13 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .verdict-banner.timeout .verdict-word { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
 .verdict-detail { color: var(--muted); font-size: 12.5px; }
 
+/* compact: matches Run's type size so the pair reads as one control row */
 .jump-btn {
   border-color: var(--fail);
   color: var(--fail);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
+  padding-inline: 10px;
 }
 
 /* Jump + Run as one right-aligned group. Both buttons share a height and
@@ -548,8 +550,9 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
-  padding-block: 5px;
+  min-height: 28px;
+  padding-block: 4px;
+  line-height: 1.2;
   white-space: nowrap;
 }
 .jump-btn:hover:not(:disabled) {
