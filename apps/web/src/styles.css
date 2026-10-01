@@ -475,9 +475,8 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 }
 .run-btn:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
 .run-btn:disabled { opacity: 0.7; }
-/* app-bar variant, shown only while the source pane is collapsed away */
+/* stage-header variant, sized to sit in one row with "Jump to failing step" */
 .run-btn.compact { padding: 5px 14px; font-size: 11px; }
-.run-hint { display: inline-flex; gap: 3px; align-items: center; color: var(--muted); }
 .demo-btn { color: var(--muted); font-size: 12px; }
 .error-note {
   color: var(--fail);
@@ -533,8 +532,25 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   border-color: var(--fail);
   color: var(--fail);
   font-weight: 600;
-  margin-left: auto;
   font-size: 12px;
+}
+
+/* Jump + Run as one right-aligned group. Both buttons share a height and
+   never wrap their labels, so the pair stays a single aligned row. */
+.verdict-actions {
+  display: flex;
+  align-items: stretch;
+  gap: var(--s-2);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.verdict-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding-block: 5px;
+  white-space: nowrap;
 }
 .jump-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--fail) 15%, transparent);
@@ -1130,6 +1146,13 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   .case-row label:first-of-type { grid-column: 1 / -1; }
   .app-bar { flex-wrap: wrap; height: auto; padding: var(--s-2) var(--s-3); }
   .import-badge { max-width: 100%; }
+}
+
+/* Phone: the action pair takes its own full-width row beneath the verdict,
+   splitting the width evenly so both stay large enough to tap. */
+@media (max-width: 560px) {
+  .verdict-actions { flex: 1 1 100%; margin-left: 0; }
+  .verdict-actions > button { flex: 1 1 0; min-height: 36px; }
 }
 
 /* ---------- reduced motion ---------- */

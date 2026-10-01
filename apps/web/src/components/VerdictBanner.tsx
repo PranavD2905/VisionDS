@@ -1,7 +1,12 @@
+import type { ReactNode } from 'react';
 import { fmt } from '../lib/format';
 import { useVis } from '../store';
 
-export function VerdictBanner() {
+/**
+ * `action` is the workbench's Run button, passed in rather than owned here so
+ * it shares one aligned row with "Jump to failing step".
+ */
+export function VerdictBanner({ action }: { action?: ReactNode }) {
   const traces = useVis((s) => s.traces);
   const active = useVis((s) => s.active);
   const setActive = useVis((s) => s.setActive);
@@ -44,10 +49,15 @@ export function VerdictBanner() {
           {result.message ?? 'execution was cut off'} — trace truncated
         </span>
       )}
-      {div !== undefined && (
-        <button className="jump-btn" onClick={() => seek(div)}>
-          Jump to failing step →
-        </button>
+      {(div !== undefined || action) && (
+        <div className="verdict-actions">
+          {div !== undefined && (
+            <button className="jump-btn" onClick={() => seek(div)}>
+              Jump to failing step →
+            </button>
+          )}
+          {action}
+        </div>
       )}
     </div>
   );
