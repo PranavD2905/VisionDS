@@ -203,21 +203,27 @@ pnpm workspaces monorepo:
   `editorActiveLine.ts` (a CodeMirror decoration, so it tracks real line
   geometry). Editing after a run shows a "stale" note rather than pretending
   the diagram still matches.
-  Either source region can also be **collapsed** from VS-Code-style toggles in
-  the app bar beside the theme switch (`components/PaneToggles.tsx`): the icon
-  is a miniature of the window with a band where that region actually sits
-  (code = the left column, testcases = the bottom strip — VS Code's side-bar
-  and panel icons), solid when showing. Collapsing the code takes the entry
-  picker and the system-code strip with it: both are code UI, and leaving a
-  second CodeMirror on screen made "hide the code" look broken. Collapsing one gives
-  the pane to the other and drops the drag handle (no boundary left to move);
-  collapsing both unmounts the source pane entirely so the stage takes the
-  whole window. **Run lives in the stage header**, in one `.verdict-actions`
-  row beside "Jump to failing step" (alone before the first run), so hiding
-  the editor never costs the ability to run (⌘/Ctrl+Enter works either way,
-  being a window listener). The flags live in
-  `layout.ts` beside the split fractions, and only an explicit `false`
-  collapses — a missing flag must never hide a region nobody chose to hide.
+  The source panel can be **collapsed** from VS-Code-style toggles in the app
+  bar beside the theme switch (`components/PaneToggles.tsx`): the icon is a
+  miniature of the window with a band where that region actually sits
+  (source = the left column, testcases = the bottom strip — VS Code's side-bar
+  and panel icons), solid when showing. The left-column toggle hides the
+  **whole** panel — header, language tabs, entry picker, system code, editor,
+  testcases and footer — and the stage takes the full width (no empty column,
+  no drag handle). The testcases toggle hides only that strip, giving the
+  editor the pane; pressed while the panel is collapsed, it brings the panel
+  back with testcases showing, so a region's toggle always reveals that region.
+  Both stay visible and carry `aria-pressed` + `aria-controls`. The panel is
+  **hidden, never unmounted** (`hidden` + `.pane[hidden] { display: none }`,
+  since `.pane`'s flex display would otherwise beat the UA rule), so the editor
+  keeps its undo history, cursor and scroll; code, language, testcases and the
+  run live above it in `WorkbenchPage`/the store anyway. **Run lives in the
+  stage header**, in one `.verdict-actions` row beside "Jump to failing step"
+  (alone before the first run), so collapsing never costs the ability to run
+  (⌘/Ctrl+Enter works either way, being a window listener). The flags
+  (`sourceOpen`, `casesOpen`) live in `layout.ts` beside the split fractions,
+  and only an explicit `false` collapses — a missing flag must never hide a
+  region nobody chose to hide (a legacy `codeOpen` is ignored for that reason).
   Both splits are **drag-resizable** (`components/Splitter.tsx`, a
   pointer-capture `separator` that is also arrow-key operable and
   double-click-centres): source↔stage and, inside the source pane,

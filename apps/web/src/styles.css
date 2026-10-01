@@ -292,6 +292,9 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
    stage takes the whole window. Run moves to the app bar so hiding the editor
    never costs you the ability to run. */
 .workbench-split.source-collapsed { grid-template-columns: minmax(0, 1fr); }
+/* `.pane` is display:flex, which would beat the UA's [hidden] rule — the
+   collapsed source panel must leave the grid entirely, not hold a column */
+.pane[hidden] { display: none; }
 
 /* editor / testcases split inside the source pane */
 .source-split {

@@ -1,22 +1,22 @@
 /**
- * VS-Code-style region toggles for the workbench's two source regions.
+ * VS-Code-style region toggles for the workbench.
  *
  * The icon is a miniature of the window: a framed rectangle with the region
- * the button controls drawn inside it — a band at the top for the editor, a
- * band at the bottom for the testcases, matching how they actually stack in
- * the source pane. Solid means the region is showing, ghosted means collapsed,
- * so the row of icons reads as a map of the current layout at a glance.
+ * the button controls drawn inside it — the left column for the whole source
+ * panel, a band at the bottom for its testcases. Solid means the region is
+ * showing, ghosted means collapsed, so the row of icons reads as a map of the
+ * current layout at a glance.
  */
-export type PaneRegion = 'code' | 'cases';
+export type PaneRegion = 'source' | 'cases';
 
 /**
  * Where each region's band sits inside the miniature window — matching where
- * the region actually is on screen: the code pane is the left column, the
+ * the region actually is on screen: the source panel is the left column, the
  * testcases are the bottom strip. Same convention as VS Code's side-bar and
  * panel icons.
  */
 const BANDS: Record<PaneRegion, { x: number; y: number; width: number; height: number }> = {
-  code: { x: 3.2, y: 3.7, width: 3.7, height: 8.6 },
+  source: { x: 3.2, y: 3.7, width: 3.7, height: 8.6 },
   cases: { x: 3.4, y: 9.6, width: 9.2, height: 2.7 },
 };
 
@@ -25,11 +25,14 @@ export function PaneToggle({
   on,
   onToggle,
   label,
+  controls,
 }: {
   region: PaneRegion;
   on: boolean;
   onToggle: () => void;
   label: string;
+  /** id of the element this button shows and hides. */
+  controls?: string;
 }) {
   const band = BANDS[region];
   return (
@@ -38,6 +41,7 @@ export function PaneToggle({
       className={`pane-toggle${on ? ' on' : ''}`}
       onClick={onToggle}
       aria-pressed={on}
+      aria-controls={controls}
       aria-label={`${on ? 'Hide' : 'Show'} ${label.toLowerCase()}`}
       title={`${on ? 'Hide' : 'Show'} ${label}`}
     >

@@ -12,6 +12,9 @@ import { useTheme } from '../theme/useTheme';
 
 const LANG_MODE = { cpp, java, python } as const;
 
+/** The panel's id, so the app-bar toggles can point at what they show and hide. */
+export const SOURCE_PANE_ID = 'source-pane';
+
 export interface SourcePaneProps {
   language: string;
   code: string;
@@ -33,8 +36,10 @@ export interface SourcePaneProps {
   /** Fraction of the pane given to the editor; the testcases take the rest. */
   editorSplit: number;
   onEditorSplit: (value: number) => void;
-  /** Region visibility, driven by the app-bar toggles. */
-  codeOpen: boolean;
+  /** The whole panel is collapsed. It stays mounted, only hidden, so the
+   * editor keeps its undo history, cursor and scroll for when it comes back. */
+  hidden: boolean;
+  /** Testcases region visibility, driven by the app-bar toggle. */
   casesOpen: boolean;
   onLanguage: (id: string) => void;
   onCode: (code: string) => void;
@@ -66,7 +71,7 @@ export function SourcePane({
   stale,
   editorSplit,
   onEditorSplit,
-  codeOpen,
+  hidden,
   casesOpen,
   onLanguage,
   onCode,
@@ -106,7 +111,12 @@ export function SourcePane({
     onCases((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
 
   return (
-    <section className="pane pane-source frame" aria-label="Your solution">
+    <section
+      id={SOURCE_PANE_ID}
+      className="pane pane-source frame"
+      aria-label="Your solution"
+      hidden={hidden}
+    >
       <header className="pane-head">
         <span className="pane-title">Source</span>
         <div className="lang-tabs" role="tablist" aria-label="Language">
@@ -131,10 +141,7 @@ export function SourcePane({
         </div>
       </header>
 
-      {/* The entry picker and the system-code strip are code UI too — a second
-          CodeMirror left on screen is why hiding "the code" never looked like
-          it had worked. They collapse with the editor. */}
-      {codeOpen && candidates.length >= 2 && (
+      {candidates.length >= 2 && (
         <div className="entry-picker">
           <label>
             <span>Ambiguous entry point — run:</span>
@@ -159,52 +166,48 @@ export function SourcePane({
         </div>
       )}
 
-      {codeOpen && (
-        <details className="system-code">
-          <summary>System code (auto-generated, editable)</summary>
-          <CodeMirror
-            value={systemCode}
-            theme="none"
-            extensions={extensions}
-            onChange={onSystemCode}
-          />
-        </details>
-      )}
+      <details className="system-code">
+        <summary>System code (auto-generated, editable)</summary>
+        <CodeMirror
+          value={systemCode}
+          theme="none"
+          extensions={extensions}
+          onChange={onSystemCode}
+        />
+      </details>
 
       {/* Editor and testcases share this region, split by the drag handle.
           The editor takes its height from the grid row, never a percentage of
           a scrolling parent — CodeMirror re-measures on every layout change
           and a percentage inside an auto-height ancestor loops forever. */}
-      {/* Region visibility drives the row template: with one side collapsed
-          the survivor takes the whole pane, and the drag handle goes away
-          because there is no longer a boundary to move. */}
+      {/* Testcases visibility drives the row template: collapsed, the editor
+          takes the whole pane, and the drag handle goes away because there is
+          no longer a boundary to move. */}
       <div
-        className={`source-split${codeOpen && casesOpen ? '' : ' single'}`}
+        className={`source-split${casesOpen ? '' : ' single'}`}
         ref={splitRef}
         style={{ ['--editor-split' as string]: editorSplit }}
       >
         {/* editor + its stale note are one grid row, so the row count stays
             fixed whether or not the note is showing */}
-        {codeOpen && (
-          <div className="editor-region">
-            <div className="editor-holder">
-              <CodeMirror
-                ref={editor}
-                value={code}
-                theme="none"
-                extensions={extensions}
-                onChange={onCode}
-              />
-            </div>
-            {stale && (
-              <p className="stale-note">
-                Edited since this run — the diagram still shows the previous execution.
-              </p>
-            )}
+        <div className="editor-region">
+          <div className="editor-holder">
+            <CodeMirror
+              ref={editor}
+              value={code}
+              theme="none"
+              extensions={extensions}
+              onChange={onCode}
+            />
           </div>
-        )}
+          {stale && (
+            <p className="stale-note">
+              Edited since this run — the diagram still shows the previous execution.
+            </p>
+          )}
+        </div>
 
-        {codeOpen && casesOpen && (
+        {casesOpen && (
           <Splitter
             orientation="horizontal"
             value={editorSplit}

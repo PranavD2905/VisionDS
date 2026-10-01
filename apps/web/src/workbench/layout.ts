@@ -10,16 +10,16 @@ export interface WorkbenchLayout {
   split: number;
   /** Fraction of the source pane taken by the editor (testcases get the rest). */
   editorSplit: number;
-  /** Whether the editor region is showing. */
-  codeOpen: boolean;
-  /** Whether the testcases region is showing. */
+  /** Whether the whole source panel is showing. Collapsed, the stage takes its room. */
+  sourceOpen: boolean;
+  /** Whether the testcases region is showing inside the source panel. */
   casesOpen: boolean;
 }
 
 export const DEFAULT_LAYOUT: WorkbenchLayout = {
   split: 0.46,
   editorSplit: 0.62,
-  codeOpen: true,
+  sourceOpen: true,
   casesOpen: true,
 };
 
@@ -38,8 +38,9 @@ export function readLayout(): WorkbenchLayout {
       split: clamp(d.split, 0.2, 0.8, DEFAULT_LAYOUT.split),
       editorSplit: clamp(d.editorSplit, 0.2, 0.85, DEFAULT_LAYOUT.editorSplit),
       // only an explicit `false` collapses — a missing/garbage flag must never
-      // hide a region the student never chose to hide
-      codeOpen: d.codeOpen !== false,
+      // hide a region the student never chose to hide (so a legacy `codeOpen`
+      // flag, which only ever hid the editor, is ignored rather than migrated)
+      sourceOpen: d.sourceOpen !== false,
       casesOpen: d.casesOpen !== false,
     };
   } catch {

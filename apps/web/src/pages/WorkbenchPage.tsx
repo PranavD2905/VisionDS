@@ -10,7 +10,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { DEFAULT_LANGUAGE, langById } from '../languages';
 import { readImportFromHash, type ImportProblem } from '../lib/import';
 import { useActiveTrace, useVis } from '../store';
-import { SourcePane } from '../workbench/SourcePane';
+import { SOURCE_PANE_ID, SourcePane } from '../workbench/SourcePane';
 import { StagePane } from '../workbench/StagePane';
 import { readDraft, writeDraft, type WorkbenchDraft } from '../workbench/draft';
 import { readLayout, writeLayout, type WorkbenchLayout } from '../workbench/layout';
@@ -49,10 +49,19 @@ export function WorkbenchPage() {
   const [layout, setLayout] = useState<WorkbenchLayout>(readLayout);
   const splitRef = useRef<HTMLElement>(null);
   const setSplit = (split: number) => setLayout((l) => ({ ...l, split }));
-  const toggleRegion = (key: 'codeOpen' | 'casesOpen') =>
-    setLayout((l) => ({ ...l, [key]: !l[key] }));
-  /** Both regions collapsed: nothing left to edit, so the stage takes the room. */
-  const sourceCollapsed = !layout.codeOpen && !layout.casesOpen;
+  /** The left-column toggle: hides or restores the whole source panel. */
+  const toggleSource = () => setLayout((l) => ({ ...l, sourceOpen: !l.sourceOpen }));
+  /**
+   * The testcases toggle. Pressing it while the panel is collapsed brings the
+   * panel back with the testcases showing — a region's toggle always reveals
+   * that region, rather than flipping a flag nobody can see.
+   */
+  const toggleCases = () =>
+    setLayout((l) =>
+      l.sourceOpen ? { ...l, casesOpen: !l.casesOpen } : { ...l, sourceOpen: true, casesOpen: true },
+    );
+  /** Panel collapsed: the stage takes the whole width. */
+  const sourceCollapsed = !layout.sourceOpen;
   const setEditorSplit = (editorSplit: number) => setLayout((l) => ({ ...l, editorSplit }));
   useEffect(() => {
     const timer = setTimeout(() => writeLayout(layout), 300);
@@ -315,16 +324,18 @@ export function WorkbenchPage() {
           </Link>
           <div className="pane-toggles" role="group" aria-label="Toggle panes">
             <PaneToggle
-              region="code"
-              on={layout.codeOpen}
-              onToggle={() => toggleRegion('codeOpen')}
-              label="the code editor"
+              region="source"
+              on={layout.sourceOpen}
+              onToggle={toggleSource}
+              label="the source panel"
+              controls={SOURCE_PANE_ID}
             />
             <PaneToggle
               region="cases"
-              on={layout.casesOpen}
-              onToggle={() => toggleRegion('casesOpen')}
+              on={layout.sourceOpen && layout.casesOpen}
+              onToggle={toggleCases}
               label="the testcases"
+              controls={SOURCE_PANE_ID}
             />
           </div>
           <ThemeToggle />
@@ -337,33 +348,33 @@ export function WorkbenchPage() {
         ref={splitRef}
         style={{ ['--split' as string]: layout.split }}
       >
-        {!sourceCollapsed && (
-          <SourcePane
-            editorSplit={layout.editorSplit}
-            onEditorSplit={setEditorSplit}
-            codeOpen={layout.codeOpen}
-            casesOpen={layout.casesOpen}
-            language={language}
-            code={code}
-            systemCode={systemCode}
-            candidates={candidates}
+        {/* Always mounted, only hidden when collapsed — the editor keeps its
+            undo history, cursor and scroll across collapse and expand. */}
+        <SourcePane
+          hidden={sourceCollapsed}
+          editorSplit={layout.editorSplit}
+          onEditorSplit={setEditorSplit}
+          casesOpen={layout.casesOpen}
+          language={language}
+          code={code}
+          systemCode={systemCode}
+          candidates={candidates}
           entry={entry}
-            cases={cases}
-            busy={busy}
-            error={error}
-            activeLine={step?.line ?? null}
-            activeLineIsException={Boolean(isException)}
-            stale={
-              Boolean(trace) && (trace!.code !== code || (trace!.systemCode ?? '') !== systemCode)
-            }
-            onLanguage={switchLanguage}
-            onCode={setCode}
-            onSystemCode={onSystemCode}
-            onPickEntry={onPickEntry}
-            onCases={setCases}
-            onDemo={language === 'python' ? () => show([twoSumFailTrace]) : undefined}
-          />
-        )}
+          cases={cases}
+          busy={busy}
+          error={error}
+          activeLine={step?.line ?? null}
+          activeLineIsException={Boolean(isException)}
+          stale={
+            Boolean(trace) && (trace!.code !== code || (trace!.systemCode ?? '') !== systemCode)
+          }
+          onLanguage={switchLanguage}
+          onCode={setCode}
+          onSystemCode={onSystemCode}
+          onPickEntry={onPickEntry}
+          onCases={setCases}
+          onDemo={language === 'python' ? () => show([twoSumFailTrace]) : undefined}
+        />
         {!sourceCollapsed && (
           <Splitter
             orientation="vertical"
