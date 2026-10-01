@@ -267,6 +267,20 @@ export function WorkbenchPage() {
     load({ language: id, code: def.starterCode, cases: def.starterCases });
   };
 
+  // The one Run button: it sits in the stage header beside "Jump to failing
+  // step", so it stays reachable however the source pane is collapsed.
+  const runButton = (
+    <button
+      className="run-btn compact"
+      onClick={onRun}
+      disabled={busy || !systemCodeReady}
+      title="Run & visualize (⌘/Ctrl + ↵)"
+      aria-keyshortcuts="Meta+Enter Control+Enter"
+    >
+      {busy ? (status ?? 'Running…') : !systemCodeReady ? 'Preparing…' : 'Run & visualize'}
+    </button>
+  );
+
   const step = trace?.steps[cursor];
   const isException =
     step?.event === 'exception' ||
@@ -299,16 +313,6 @@ export function WorkbenchPage() {
           <Link to="/product" className="app-bar-link">
             Spec
           </Link>
-          {sourceCollapsed && (
-            <button
-              className="run-btn compact"
-              onClick={onRun}
-              disabled={busy || !systemCodeReady}
-              title="Run & visualize (⌘/Ctrl + ↵)"
-            >
-              {busy ? (status ?? 'Running…') : !systemCodeReady ? 'Preparing…' : 'Run'}
-            </button>
-          )}
           <div className="pane-toggles" role="group" aria-label="Toggle panes">
             <PaneToggle
               region="code"
@@ -346,8 +350,6 @@ export function WorkbenchPage() {
           entry={entry}
             cases={cases}
             busy={busy}
-            runDisabled={!systemCodeReady}
-            status={status}
             error={error}
             activeLine={step?.line ?? null}
             activeLineIsException={Boolean(isException)}
@@ -359,7 +361,6 @@ export function WorkbenchPage() {
             onSystemCode={onSystemCode}
             onPickEntry={onPickEntry}
             onCases={setCases}
-            onRun={onRun}
             onDemo={language === 'python' ? () => show([twoSumFailTrace]) : undefined}
           />
         )}
@@ -374,7 +375,7 @@ export function WorkbenchPage() {
             label="Resize source and stage panes"
           />
         )}
-        <StagePane trace={trace} />
+        <StagePane trace={trace} runAction={runButton} />
       </main>
     </div>
   );

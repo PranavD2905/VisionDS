@@ -22,11 +22,8 @@ export interface SourcePaneProps {
   /** The entry the current `systemCode` was actually generated for. */
   entry: Entry | undefined;
   cases: TestCase[];
+  /** A run is in flight. Run itself lives beside the verdict in the stage pane. */
   busy: boolean;
-  /** True while the default system code is still being (re)generated — Run
-   * is disabled meanwhile, so it never fires against a stale/empty pairing. */
-  runDisabled: boolean;
-  status: string | null;
   error: string | null;
   /** Line to mark during playback; null when idle. */
   activeLine: number | null;
@@ -44,12 +41,12 @@ export interface SourcePaneProps {
   onSystemCode: (code: string) => void;
   onPickEntry: (entry: Entry) => void;
   onCases: (update: (cases: TestCase[]) => TestCase[]) => void;
-  onRun: () => void;
   onDemo?: () => void;
 }
 
 /**
- * The input half of the workbench: language, source, testcases, run.
+ * The input half of the workbench: language, source, testcases. Run sits
+ * beside the verdict in the stage pane, next to "Jump to failing step".
  *
  * The editor doubles as the playback code panel — `activeLine` marks the
  * current step in place, so there is only ever one copy of your source on
@@ -63,8 +60,6 @@ export function SourcePane({
   entry,
   cases,
   busy,
-  runDisabled,
-  status,
   error,
   activeLine,
   activeLineIsException,
@@ -78,7 +73,6 @@ export function SourcePane({
   onSystemCode,
   onPickEntry,
   onCases,
-  onRun,
   onDemo,
 }: SourcePaneProps) {
   const editor = useRef<ReactCodeMirrorRef>(null);
@@ -268,15 +262,6 @@ export function SourcePane({
       </div>
 
       <footer className="pane-foot">
-        <button className="run-btn" onClick={onRun} disabled={busy || runDisabled}>
-          {busy ? (status ?? 'Running…') : runDisabled ? 'Preparing…' : 'Run & visualize'}
-        </button>
-        {!busy && (
-          <span className="run-hint">
-            <kbd>⌘</kbd>
-            <kbd>↵</kbd>
-          </span>
-        )}
         {onDemo && !busy && (
           <button className="demo-btn" onClick={onDemo}>
             Demo trace

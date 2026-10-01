@@ -1,5 +1,5 @@
 import { buildCallTree, type ExecutionTrace } from '@visionds/trace-schema';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { CallTreeView } from '../components/CallTreeView';
 import { ExplainPanel } from '../components/ExplainPanel';
 import { EXPLAINER_ENABLED } from '../features';
@@ -16,7 +16,14 @@ import { useVis } from '../store';
  * Reads playback state from the store rather than taking it as props, so the
  * source pane and this one stay independent — neither re-renders the other.
  */
-export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
+export function StagePane({
+  trace,
+  runAction,
+}: {
+  trace: ExecutionTrace | undefined;
+  /** The Run button — rendered beside "Jump to failing step", or alone before any run. */
+  runAction?: ReactNode;
+}) {
   const cursor = useVis((s) => s.cursor);
   const explanation = useVis((s) => s.explanation);
   const [view, setView] = useState<'stage' | 'calls'>('stage');
@@ -51,6 +58,7 @@ export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
       <section className="pane pane-stage frame" aria-label="Visualization">
         <header className="pane-head">
           <span className="pane-title">Stage</span>
+          {runAction && <div className="verdict-actions">{runAction}</div>}
         </header>
         <div className="stage-empty-state">
           <img className="empty-mark" src="/logo.svg" alt="" aria-hidden="true" />
@@ -69,7 +77,7 @@ export function StagePane({ trace }: { trace: ExecutionTrace | undefined }) {
   return (
     <section className="pane pane-stage frame" aria-label="Visualization">
       <header className="pane-head pane-head-verdict">
-        <VerdictBanner />
+        <VerdictBanner action={runAction} />
         {hasRecursion && (
           <div className="view-tabs" role="tablist" aria-label="Stage view">
             <button

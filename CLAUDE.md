@@ -212,9 +212,10 @@ pnpm workspaces monorepo:
   second CodeMirror on screen made "hide the code" look broken. Collapsing one gives
   the pane to the other and drops the drag handle (no boundary left to move);
   collapsing both unmounts the source pane entirely so the stage takes the
-  whole window, and **Run moves into the app bar** — hiding the editor must
-  never cost the ability to run (⌘/Ctrl+Enter works either way, being a
-  window listener). The flags live in
+  whole window. **Run lives in the stage header**, in one `.verdict-actions`
+  row beside "Jump to failing step" (alone before the first run), so hiding
+  the editor never costs the ability to run (⌘/Ctrl+Enter works either way,
+  being a window listener). The flags live in
   `layout.ts` beside the split fractions, and only an explicit `false`
   collapses — a missing flag must never hide a region nobody chose to hide.
   Both splits are **drag-resizable** (`components/Splitter.tsx`, a
