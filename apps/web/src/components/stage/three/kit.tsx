@@ -379,12 +379,14 @@ export function StageCanvas({
   height,
   camera = [0, 4.4, 10.4],
   look = [0, 0.9, 0],
+  paused = false,
   children,
 }: {
   width: number;
   height: number;
   camera?: [number, number, number];
   look?: [number, number, number];
+  paused?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -392,6 +394,7 @@ export function StageCanvas({
       <Canvas
         shadows
         flat
+        frameloop={paused ? 'never' : 'always'}
         dpr={[1, 2]}
         gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
         camera={{ position: camera, fov: 30, near: 0.1, far: 80 }}

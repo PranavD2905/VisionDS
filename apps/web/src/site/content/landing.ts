@@ -15,7 +15,7 @@ export const LANDING_SPECIMENS: SpecimenSpec[] = [
     demo: 'array-scan',
     span: 2,
     status: 'live',
-    note: 'Integers that stay in bounds of an array are inferred as pointers and ride above the cells, gliding between slots instead of blinking.',
+    note: 'Integers that stay in bounds of an array are inferred as pointers and ride above the blocks, gliding between slots instead of blinking.',
   },
   {
     id: 'stack',
@@ -25,7 +25,7 @@ export const LANDING_SPECIMENS: SpecimenSpec[] = [
     tag: { label: 'Behaviour', glyph: '⇅' },
     demo: 'stack',
     status: 'live',
-    note: 'Push/pop patterns are detected from the trace, then drawn as a pile with a marker on top.',
+    note: 'Push/pop patterns are detected from the trace, then built as a tower — pushes drop in from above, the top tag rides the summit.',
   },
   {
     id: 'map',
@@ -35,7 +35,7 @@ export const LANDING_SPECIMENS: SpecimenSpec[] = [
     tag: { label: 'Structure', glyph: '⌗' },
     demo: 'map',
     status: 'live',
-    note: 'Keys and values as rows joined by drawn arrows — insertion order preserved as the run made it.',
+    note: 'Each key gets a landing pad; its value drops onto it as a block — insertion order preserved as the run made it.',
   },
   {
     id: 'list-walk',
@@ -45,7 +45,7 @@ export const LANDING_SPECIMENS: SpecimenSpec[] = [
     tag: { label: 'Traversal', glyph: '→' },
     demo: 'list-walk',
     status: 'live',
-    note: 'Nodes chained by arrows, ending in null — or a cycle note when your pointers never terminate.',
+    note: 'Nodes chained by arrow struts, ending in null — or an arced cycle tube when your pointers never terminate.',
   },
   {
     id: 'divergence',
