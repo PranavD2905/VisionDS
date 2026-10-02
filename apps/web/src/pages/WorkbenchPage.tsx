@@ -1,6 +1,6 @@
 import { consumeCapture, pullCaptures } from '@visionds/auth';
-import { twoSumFailTrace, type Entry, type TestCase } from '@visionds/trace-schema';
-import { useEffect, useRef, useState } from 'react';
+import { twoSumFailTrace, type TestCase } from '@visionds/trace-schema';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AccountMenu } from '../auth/AccountMenu';
 import { PaneToggle } from '../components/PaneToggles';
@@ -12,9 +12,9 @@ import { readImportFromHash, type ImportProblem } from '../lib/import';
 import { useActiveTrace, useVis } from '../store';
 import { SourcePane } from '../workbench/SourcePane';
 import { StagePane } from '../workbench/StagePane';
-import { readDraft, writeDraft, type WorkbenchDraft } from '../workbench/draft';
+import { readDraft, writeDraft } from '../workbench/draft';
 import { readLayout, writeLayout, type WorkbenchLayout } from '../workbench/layout';
-import { getDefaultSystemCode } from '../workbench/systemCode';
+import { deriveSource, sourceReducer, type SourceState } from '../workbench/source';
 import { useRun } from '../workbench/useRun';
 
 interface LoadRun {
@@ -59,129 +59,39 @@ export function WorkbenchPage() {
     return () => clearTimeout(timer);
   }, [layout]);
 
-  const [language, setLanguage] = useState(restored?.language ?? DEFAULT_LANGUAGE);
-  const [code, setCode] = useState(() => restored?.code ?? langById(DEFAULT_LANGUAGE).starterCode);
-  const [systemCode, setSystemCode] = useState(restored?.systemCode ?? '');
-  const [entry, setEntry] = useState<Entry | undefined>(undefined);
-  const [candidates, setCandidates] = useState<Entry[]>([]);
-  /** True once the student has directly edited the system-code strip — after
-   * that, further code edits stop auto-regenerating it (the student owns it). */
-  const [systemCodeDirty, setSystemCodeDirty] = useState(restored?.systemCodeDirty ?? false);
-  /** False while a default system-code fetch is in flight — Run is disabled
-   * meanwhile, since running against a stale/empty systemCode can produce a
-   * broken program server-side (e.g. a C++ translation unit with no main()).
-   * A restored *dirty* strip starts ready: the rescan effect below bails out
-   * on dirty drafts, so nothing else would ever flip this true again. */
-  const [systemCodeReady, setSystemCodeReady] = useState(restored?.systemCodeDirty ?? false);
-  const [cases, setCases] = useState<TestCase[]>(
-    () => restored?.cases ?? langById(DEFAULT_LANGUAGE).starterCases,
+  /**
+   * The source being edited — language, code, testcases, call-site choice —
+   * held by one pure reducer. The call site, its entry point and the picker's
+   * candidates are *derived* from it synchronously (the entry policy parses
+   * in the browser), so there is no fetch to race, no "preparing" state and
+   * no flag that can disagree with another.
+   */
+  const [source, dispatch] = useReducer(sourceReducer, restored, (r): SourceState => {
+    const def = langById(DEFAULT_LANGUAGE);
+    return r ?? {
+      language: def.id,
+      code: def.starterCode,
+      cases: def.starterCases,
+      callSite: { kind: 'auto' },
+      problem: null,
+    };
+  });
+  const { language, code, cases, problem: imported } = source;
+  const view = useMemo(
+    () => deriveSource(source),
+    // the testcases never change what the call site resolves to
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [source.language, source.code, source.callSite],
   );
-  const [imported, setImported] = useState<ImportProblem | null>(restored?.problem ?? null);
 
   const trace = useActiveTrace();
   const cursor = useVis((s) => s.cursor);
   const { busy, status, error, setError, run, show } = useRun(client, Boolean(user));
 
-  /**
-   * `load()` and the debounced rescan effect below can both fire a
-   * `getDefaultSystemCode` fetch for the same edit (e.g. switching languages
-   * changes `code`/`language`, which `load()` handles directly *and* which
-   * the rescan effect's dependency array also reacts to). Whichever request
-   * resolves last would otherwise win, even if it was the stale one — e.g.
-   * the rescan effect closing over the *previous* language's `entry` and
-   * racing ahead of `load()`'s correct, override-free fetch. Every fetch is
-   * tagged with a request generation; only the response matching the latest
-   * generation is ever applied.
-   */
-  const requestGen = useRef(0);
-
-  /**
-   * Load a source into the editor, from any of the three entry points. Also
-   * runs the entry-candidate scan and resets `systemCodeDirty`, so a freshly
-   * loaded/imported/history-reopened solution always gets a fresh default.
-   */
+  /** Load a source from any of the three entry points; the call site goes back to auto. */
   const load = (next: LoadRun) => {
-    const def = langById(next.language);
-    const nextCode = next.code || def.starterCode;
-    setLanguage(def.id);
-    setCode(nextCode);
-    setCases(next.cases.length ? next.cases : def.starterCases);
-    setImported(next.problem ?? null);
     setError(null);
-    setSystemCodeDirty(false);
-    setSystemCodeReady(false);
-    setEntry(undefined);
-    const gen = ++requestGen.current;
-    void getDefaultSystemCode(def.id, nextCode).then(
-      (seed) => {
-        if (requestGen.current !== gen) return;
-        setSystemCode(seed.systemCode);
-        setEntry(seed.entry);
-        setCandidates(seed.candidates);
-        setSystemCodeReady(true);
-      },
-      () => {
-        if (requestGen.current !== gen) return;
-        // No entry point detected yet (e.g. an empty editor) — leave system
-        // code blank; the next successful load (or a run) will populate it.
-        // Run stays disabled (systemCodeReady false) until it does.
-        setSystemCode('');
-        setEntry(undefined);
-        setCandidates([]);
-      },
-    );
-  };
-
-  /**
-   * Re-scan for entry candidates whenever the student's code actually
-   * changes — pasting a whole new solution needs this just as much as the
-   * initial load does. Debounced so it settles after a paste or a burst of
-   * typing rather than firing on every keystroke; skipped once the student
-   * has started editing the system-code strip directly, since at that point
-   * further auto-regeneration would clobber their edits.
-   */
-  useEffect(() => {
-    if (systemCodeDirty) return;
-    setSystemCodeReady(false);
-    const timer = setTimeout(() => {
-      const gen = ++requestGen.current;
-      getDefaultSystemCode(language, code, entry).then(
-        (seed) => {
-          if (requestGen.current !== gen) return;
-          setSystemCode(seed.systemCode);
-          setEntry(seed.entry);
-          setCandidates(seed.candidates);
-          setSystemCodeReady(true);
-        },
-        () => {
-          if (requestGen.current !== gen) return;
-          setCandidates([]);
-        },
-      );
-    }, 500);
-    return () => clearTimeout(timer);
-    // Only the code itself (and language) should trigger a rescan — `entry`
-    // is read as "keep the current pick if it still exists", not a trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, language, systemCodeDirty]);
-
-  /** A dropdown pick: regenerate the call line for a specific candidate. */
-  const onPickEntry = (picked: Entry) => {
-    setSystemCodeDirty(false);
-    setSystemCodeReady(false);
-    const gen = ++requestGen.current;
-    void getDefaultSystemCode(language, code, picked).then((seed) => {
-      if (requestGen.current !== gen) return;
-      setSystemCode(seed.systemCode);
-      setEntry(seed.entry);
-      setSystemCodeReady(true);
-    });
-  };
-
-  const onSystemCode = (next: string) => {
-    setSystemCodeDirty(true);
-    setSystemCodeReady(true);
-    setSystemCode(next);
+    dispatch({ type: 'load', ...next, problem: next.problem ?? null });
   };
 
   // Hydrate from a `#import=…` handoff written by the browser extension.
@@ -230,27 +140,20 @@ export function WorkbenchPage() {
    * once it settles rather than on every keystroke.
    */
   useEffect(() => {
-    const draft: WorkbenchDraft = {
-      language,
-      code,
-      cases,
-      systemCode,
-      systemCodeDirty,
-      problem: imported,
-    };
-    const timer = setTimeout(() => writeDraft(draft), 400);
+    const timer = setTimeout(() => writeDraft(source), 400);
     return () => clearTimeout(timer);
-  }, [language, code, cases, systemCode, systemCodeDirty, imported]);
+  }, [source]);
 
+  // Run is never blocked on the call site: one that can't resolve comes back
+  // as an `error` verdict naming the problem, like any other submission error.
   const onRun = () => {
-    if (!systemCodeReady) return;
-    void run({ language, code, systemCode, entry, cases, problem: imported });
+    void run({ language, code, systemCode: view.callSite, cases, problem: imported });
   };
 
   // ⌘/Ctrl + Enter runs — keyboard-fast, the way the brand wants it
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && systemCodeReady) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy) {
         e.preventDefault();
         onRun();
       }
@@ -258,7 +161,7 @@ export function WorkbenchPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, systemCodeReady, code, systemCode, entry, cases, language, imported]);
+  }, [busy, source, view.callSite]);
 
   // Switching language loads that language's starter code + cases.
   const switchLanguage = (id: string) => {
@@ -273,11 +176,11 @@ export function WorkbenchPage() {
     <button
       className="run-btn compact"
       onClick={onRun}
-      disabled={busy || !systemCodeReady}
+      disabled={busy}
       title="Run & visualize (⌘/Ctrl + ↵)"
       aria-keyshortcuts="Meta+Enter Control+Enter"
     >
-      {busy ? (status ?? 'Running…') : !systemCodeReady ? 'Preparing…' : 'Run & visualize'}
+      {busy ? (status ?? 'Running…') : 'Run & visualize'}
     </button>
   );
 
@@ -345,22 +248,22 @@ export function WorkbenchPage() {
             casesOpen={layout.casesOpen}
             language={language}
             code={code}
-            systemCode={systemCode}
-            candidates={candidates}
-          entry={entry}
+            source={view}
+            callSiteEdited={source.callSite.kind === 'edited'}
             cases={cases}
             busy={busy}
             error={error}
             activeLine={step?.line ?? null}
             activeLineIsException={Boolean(isException)}
             stale={
-              Boolean(trace) && (trace!.code !== code || (trace!.systemCode ?? '') !== systemCode)
+              Boolean(trace) && (trace!.code !== code || (trace!.systemCode ?? '') !== view.callSite)
             }
             onLanguage={switchLanguage}
-            onCode={setCode}
-            onSystemCode={onSystemCode}
-            onPickEntry={onPickEntry}
-            onCases={setCases}
+            onCode={(next) => dispatch({ type: 'editCode', code: next })}
+            onCallSite={(text) => dispatch({ type: 'editCallSite', text })}
+            onResetCallSite={() => dispatch({ type: 'resetCallSite' })}
+            onPickEntry={(entry) => dispatch({ type: 'pickEntry', entry })}
+            onCases={(update) => dispatch({ type: 'editCases', update })}
             onDemo={language === 'python' ? () => show([twoSumFailTrace]) : undefined}
           />
         )}

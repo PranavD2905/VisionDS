@@ -220,13 +220,26 @@ pnpm workspaces monorepo:
   **The workbench** (`src/workbench/`) is a two-pane split: `SourcePane`
   (language, editor, testcases, run) and `StagePane` (verdict, diagrams,
   narration, transport), with `useRun` holding the run flow and `WorkbenchPage`
-  owning only the source state. That state is mirrored to localStorage by
-  `workbench/draft.ts` and restored as the initial state, so a refresh keeps
-  the student's code, testcases, language and system-code strip instead of
-  resetting to the two-sum starter; `#import=`, history re-open and extension
+  owning only layout and wiring. The source lives in `workbench/source.ts`: a
+  **pure reducer** (`load`/`editCode`/`editCases`/`editCallSite`/`pickEntry`/
+  `resetCallSite`) over `{language, code, cases, callSite, problem}`, where
+  `callSite` is a *choice* — `auto` (default entry), `picked` (a candidate,
+  regenerated on code edits, lapsing to auto if it disappears) or `edited`
+  (the student's text, never touched). `deriveSource` computes the call-site
+  text, the entry it resolves to, the picker's options (the roots; shown only
+  when there are 2+) and any `SubmissionError` **synchronously** via the
+  entry policy — no fetch, no debounce, no "Preparing…", nothing to race. Run
+  is never blocked: a call site that can't resolve shows its problem inline
+  and runs to an `error` verdict. The state is mirrored to localStorage by
+  `workbench/draft.ts` (key `…draft.v2`; a v1 draft keeps its code and cases,
+  its call site resets to auto) and restored as the initial state, so a
+  refresh keeps the student's code, testcases, language and call-site choice
+  — a pick survives a reload; `#import=`, history re-open and extension
   captures still win, since they `load()` from effects that run after initial
   state is set. `readDraft` never throws — blocked storage, corrupt JSON, an
   empty draft or an unknown language id all fall back to the starter.
+  `apps/web` has unit tests (`source.test.ts`: reducer, pick races, draft
+  round-trip) via its own `vitest.config.ts`.
   There is **one copy of your code on screen**:
   the editor stays editable and marks the current step in place via
   `editorActiveLine.ts` (a CodeMirror decoration, so it tracks real line
@@ -237,7 +250,7 @@ pnpm workspaces monorepo:
   is a miniature of the window with a band where that region actually sits
   (code = the left column, testcases = the bottom strip — VS Code's side-bar
   and panel icons), solid when showing. Collapsing the code takes the entry
-  picker and the system-code strip with it: both are code UI, and leaving a
+  picker and the call-site strip with it: both are code UI, and leaving a
   second CodeMirror on screen made "hide the code" look broken. Collapsing one gives
   the pane to the other and drops the drag handle (no boundary left to move);
   collapsing both unmounts the source pane entirely so the stage takes the
