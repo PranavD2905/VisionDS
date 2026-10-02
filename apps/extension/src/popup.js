@@ -17,7 +17,10 @@ import { pushCapture } from '@visionds/auth';
 import { getUser, signInWithGoogle, signOutUser } from './auth';
 import { authConfigured, getClient } from './supabase';
 
-const DEFAULT_SITE = 'http://localhost:5173';
+// Injected by build.mjs from VISIONDS_SITE_URL (the prod site for a store
+// build); falls back to the local dev server. The popup's own field and the
+// saved `siteUrl` still override it.
+const DEFAULT_SITE = __SITE_URL__ || 'http://localhost:5173';
 
 const state = {
   language: 'python',

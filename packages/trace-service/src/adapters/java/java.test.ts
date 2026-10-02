@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { traceCase } from '../../trace';
 
 describe('Java tracing via JDI', () => {
-  it('traces a buggy two-sum end to end', () => {
+  it('traces a buggy two-sum end to end', async () => {
     const code = `class Solution {
     public int[] twoSum(int[] nums, int target) {
         Map<Integer,Integer> seen = new HashMap<>();
@@ -14,7 +14,7 @@ describe('Java tracing via JDI', () => {
         return new int[]{};
     }
 }`;
-    const trace = traceCase('java', code, { input: '[2,7,11,15]\n9', expected: '[0,1]' });
+    const trace = await traceCase('java', code, { input: '[2,7,11,15]\n9', expected: '[0,1]' });
     expect(trace.language).toBe('java');
     expect(trace.steps.length).toBeGreaterThan(3);
 
@@ -29,7 +29,7 @@ describe('Java tracing via JDI', () => {
     expect(trace.result.divergenceStepIndex).toBeTypeOf('number');
   }, 30_000);
 
-  it('passes a correct solution and returns a List', () => {
+  it('passes a correct solution and returns a List', async () => {
     const code = `class Solution {
     public List<Integer> countRange(int n) {
         List<Integer> out = new ArrayList<>();
@@ -37,25 +37,25 @@ describe('Java tracing via JDI', () => {
         return out;
     }
 }`;
-    const trace = traceCase('java', code, { input: '4', expected: '[0,1,4,9]' });
+    const trace = await traceCase('java', code, { input: '4', expected: '[0,1,4,9]' });
     expect(trace.result.verdict).toBe('pass');
     expect(trace.steps.flatMap((s) => s.locals).some((v) => v.name === 'out' && v.kind === 'array')).toBe(true);
   }, 30_000);
 
-  it('handles a void in-place solution (reverse an int array)', () => {
+  it('handles a void in-place solution (reverse an int array)', async () => {
     const code = `class Solution {
     public void reverse(int[] nums) {
         int l = 0, r = nums.length - 1;
         while (l < r) { int t = nums[l]; nums[l] = nums[r]; nums[r] = t; l++; r--; }
     }
 }`;
-    const trace = traceCase('java', code, { input: '[1,2,3,4,5]', expected: '[5,4,3,2,1]' });
+    const trace = await traceCase('java', code, { input: '[1,2,3,4,5]', expected: '[5,4,3,2,1]' });
     expect(trace.result.verdict).toBe('pass');
     expect(trace.result.actual).toEqual([5, 4, 3, 2, 1]);
   }, 30_000);
 
-  it('reports a compile error as an error verdict', () => {
-    const trace = traceCase('java', 'class Solution { public int f(int x){ return y; } }', {
+  it('reports a compile error as an error verdict', async () => {
+    const trace = await traceCase('java', 'class Solution { public int f(int x){ return y; } }', {
       input: '3',
       expected: '3',
     });
@@ -63,7 +63,7 @@ describe('Java tracing via JDI', () => {
     expect(trace.steps).toHaveLength(0);
   }, 30_000);
 
-  it('defaults past a public helper written after the entry, and traces it', () => {
+  it('defaults past a public helper written after the entry, and traces it', async () => {
     const code = `class Solution {
     public int sumOfSquares(int[] nums) {
         int total = 0;
@@ -74,7 +74,7 @@ describe('Java tracing via JDI', () => {
         return x * x;
     }
 }`;
-    const trace = traceCase('java', code, { input: '[1,2,3]', expected: '14' });
+    const trace = await traceCase('java', code, { input: '[1,2,3]', expected: '14' });
     expect(trace.entry).toEqual({ name: 'sumOfSquares', className: 'Solution' });
     expect(trace.result.verdict).toBe('pass');
     expect(new Set(trace.steps.map((s) => s.func))).toEqual(new Set(['sumOfSquares', 'square']));
@@ -87,7 +87,7 @@ describe('Java tracing via JDI', () => {
     expect(inHelper.caller?.locals.find((v) => v.name === 'nums')?.ref).toMatch(/^j\d+$/);
   }, 30_000);
 
-  it('traces the overload the testcase argument count selects', () => {
+  it('traces the overload the testcase argument count selects', async () => {
     const code = `class Solution {
     public int solve(int a) {
         return a;
@@ -97,7 +97,7 @@ describe('Java tracing via JDI', () => {
         return s;
     }
 }`;
-    const trace = traceCase(
+    const trace = await traceCase(
       'java',
       code,
       { input: '2\n3', expected: '5' },

@@ -1,0 +1,31 @@
+name: Release extension
+
+on:
+  push:
+    tags: ['ext-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @visionds/extension build
+        env:
+          VISIONDS_SITE_URL: ${{ vars.SITE_URL }}
+          VISIONDS_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VISIONDS_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+      - run: cd apps/extension/dist && zip -r "../visionds-extension-${GITHUB_REF_NAME}.zip" .
+      # Attached to a GitHub release; uploading to the Chrome Web Store stays manual.
+      - run: gh release create "$GITHUB_REF_NAME" "apps/extension/visionds-extension-${GITHUB_REF_NAME}.zip" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

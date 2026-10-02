@@ -388,6 +388,45 @@ service still on :8787 — and the service now says so in one line instead of a
 stack trace. Run a second copy with `PORT=<port>` plus a matching
 `VITE_TRACE_SERVICE`; Vite moves to the next free port on its own.
 
+## Deployment
+
+Web → **Vercel** (`apps/web/vercel.json`: SPA rewrite, immutable cache for
+`/assets` + `/pyodide`, CSP shipped as *Report-Only* until checked in a real
+browser). Trace service → **Fly.io** (`packages/trace-service/{Dockerfile,
+fly.toml,deploy/docker-entrypoint.sh}`), scale-to-zero (`suspend`, min 0);
+the web app's `warmUp()` (`src/runner.ts`) pings `/health` when a server
+language is selected so the machine is awake by Run. Fly because lldb/JDI need
+ptrace — Firecracker VMs allow it, gVisor-style serverless does not.
+
+Trace-service hardening (all env-driven, dev defaults unchanged):
+- `proc.ts` — async spawn in its own process group; the watchdog kills the
+  whole tree. Never reintroduce `spawnSync` — it froze every request.
+- `limits.ts` — `Gate` (`MAX_CONCURRENT_TRACES`/`MAX_QUEUED_TRACES` → 429
+  `busy`), per-client `RateLimiter` (`RATE_LIMIT_PER_MINUTE`, keyed by
+  `CLIENT_IP_HEADER`), `originMatcher` (`ALLOWED_ORIGINS`; unset = `*`). Never
+  allow `https://*.vercel.app` — anyone can deploy there.
+- `sandbox.ts` — on only when `VISIONDS_SANDBOX_USER` is set (the image sets
+  it): compile *and* step run as `prlimit … -- setpriv --reuid=sandbox …`,
+  env scrubbed (`childEnv`, never `process.env`). The entrypoint installs an
+  iptables owner-match REJECT for that uid (loopback allowed for JDI, the
+  service port blocked) and **fails closed** if it can't. The server stays
+  root inside the VM because setpriv needs it. The JVM gets `-Xmx`, not
+  RLIMIT_AS. `sandbox.test.ts` only runs in the image (CI).
+- The Debian lldb `-P` path is wrong; the image passes
+  `VISIONDS_LLDB_PYTHONPATH` and checks `import lldb` at build time.
+
+CI (`.github/workflows`): `ci.yml` (JS checks on ubuntu, trace-service tests
+inside the prod image with sandbox on), `deploy-trace.yml` (test image →
+`flyctl deploy` → smoke `/trace`), `release-extension.yml` (tag `ext-v*` →
+zip with `VISIONDS_SITE_URL`/Supabase vars). Supabase migrations are pushed by
+hand, never from CI.
+
+Status (2026-10-02): code + config written; local typecheck, all tests, prod
+build, and a live server check pass (health stays sub-ms under load; past the
+queue → 429). **The image has never been built** (local Docker daemon was
+down) — the first `ci.yml` run is its first Linux/lldb/sandbox test. Nothing
+is provisioned yet (Fly app, Vercel project, Supabase prod, DNS, Web Store).
+
 ## Status (2026-07-22)
 
 - Done & verified: monorepo, trace-schema + caps + pointer inference,

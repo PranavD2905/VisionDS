@@ -1,6 +1,16 @@
+import { ensureTracerCompiled } from '../adapters/java';
 import { createTraceServer } from '../server';
 
 const PORT = Number(process.env.PORT ?? 8787);
+
+// Compile the JDI tracer before the first request: the first Java run no
+// longer pays for it, and in the container it lands in the root-owned cache
+// before any student code could touch the path. No JDK just means no Java.
+try {
+  ensureTracerCompiled();
+} catch (e) {
+  console.warn(`[visionds] Java tracing unavailable: ${e instanceof Error ? e.message : String(e)}`);
+}
 
 const server = createTraceServer();
 
@@ -23,3 +33,14 @@ server.listen(PORT, () => {
   console.log(`[visionds]   POST /trace  {language, code, systemCode?, testCase} -> ExecutionTrace`);
   console.log(`[visionds]   GET  /health`);
 });
+
+// Fly (and any orchestrator) sends SIGTERM before replacing a machine: stop
+// accepting, let in-flight traces finish, then exit — bounded so a stuck
+// trace can't hold the deploy.
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(sig, () => {
+    console.log(`[visionds] ${sig} — draining`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 25_000).unref();
+  });
+}

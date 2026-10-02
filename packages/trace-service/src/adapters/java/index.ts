@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import type { Candidate } from '@visionds/entry-policy';
 import { SubmissionError, type JsonValue } from '@visionds/trace-schema';
 import { CAPS_JSON } from '../../caps';
+import { run } from '../../proc';
+import { childEnv, giveToSandbox, sandboxed } from '../../sandbox';
 import type { LanguageAdapter, PreparedProgram } from '../types';
 import { assembleJavaProgram } from './harness';
 
@@ -37,12 +39,15 @@ function resolveJavaHome(): string {
 const bin = (tool: string) => join(resolveJavaHome(), 'bin', tool);
 
 // The JDI tracer is fixed per build; compile it once into a cache dir keyed by
-// its source, so an edited tracer is never run from a stale cached class.
+// its source, so an edited tracer is never run from a stale cached class. In
+// the container the cache lives in a root-owned VISIONDS_CACHE_DIR: under a
+// world-writable /tmp the sandbox user could plant a class at the predictable
+// path before the server compiled it.
 let tracerClasses: string | null = null;
-function ensureTracerCompiled(): string {
+export function ensureTracerCompiled(): string {
   if (tracerClasses && existsSync(join(tracerClasses, 'VisionDsTracer.class'))) return tracerClasses;
   const hash = createHash('sha256').update(readFileSync(TRACER_SRC)).digest('hex').slice(0, 12);
-  const dir = join(tmpdir(), `visionds-java-tracer-${hash}`);
+  const dir = join(process.env.VISIONDS_CACHE_DIR || tmpdir(), `visionds-java-tracer-${hash}`);
   if (existsSync(join(dir, 'VisionDsTracer.class'))) return (tracerClasses = dir);
   mkdirSync(dir, { recursive: true });
   const res = spawnSync(bin('javac'), ['-d', dir, TRACER_SRC], { encoding: 'utf8', timeout: 60_000 });
@@ -57,41 +62,49 @@ function ensureTracerCompiled(): string {
  */
 export const javaAdapter: LanguageAdapter = {
   language: 'java',
-  prepare(studentCode: string, callSite: string, entry: Candidate, args: JsonValue[]): PreparedProgram {
+  async prepare(studentCode: string, callSite: string, entry: Candidate, args: JsonValue[]): Promise<PreparedProgram> {
     const prog = assembleJavaProgram(studentCode, callSite, entry, args);
     const tracer = ensureTracerCompiled();
 
     const dir = mkdtempSync(join(tmpdir(), 'visionds-java-'));
+    giveToSandbox(dir);
     const solPath = join(dir, 'Solution.java');
     const mainPath = join(dir, 'Main.java');
     writeFileSync(solPath, prog.solution, 'utf8');
     writeFileSync(mainPath, prog.main, 'utf8');
 
-    const compile = spawnSync(bin('javac'), ['-g', '-d', dir, solPath, mainPath], {
-      encoding: 'utf8',
-      timeout: 60_000,
+    const compile = await run(...sandboxed(bin('javac'), ['-J-Xmx256m', '-g', '-d', dir, solPath, mainPath]), {
+      timeoutMs: 60_000,
+      env: childEnv({}, dir),
+      cwd: dir,
     });
+    if (compile.error) {
+      rmSync(dir, { recursive: true, force: true });
+      throw new Error(`javac failed to run: ${compile.error.message}`);
+    }
     if (compile.status !== 0) {
       rmSync(dir, { recursive: true, force: true });
       throw new SubmissionError(cleanJavacError(compile.stderr ?? 'compilation failed', dir));
     }
 
+    // No RLIMIT_AS for the JVM (it reserves far more than it touches); heaps
+    // are capped with -Xmx instead — the tracer's here, its target's in
+    // VisionDsTracer's launch options.
+    const [command, stepperArgs] = sandboxed(bin('java'), [
+      '-Xmx256m',
+      '-cp',
+      tracer,
+      'VisionDsTracer',
+      dir, // target classpath
+      'Main',
+      'Solution',
+      entry.name,
+      String(entry.params.length),
+      String(prog.studentStart),
+      CAPS_JSON,
+    ]);
     return {
-      stepper: {
-        command: bin('java'),
-        args: [
-          '-cp',
-          tracer,
-          'VisionDsTracer',
-          dir, // target classpath
-          'Main',
-          'Solution',
-          entry.name,
-          String(entry.params.length),
-          String(prog.studentStart),
-          CAPS_JSON,
-        ],
-      },
+      stepper: { command, args: stepperArgs, cwd: dir },
       cleanup: () => rmSync(dir, { recursive: true, force: true }),
     };
   },

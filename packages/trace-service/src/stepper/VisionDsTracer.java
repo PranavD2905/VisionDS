@@ -29,7 +29,8 @@ public class VisionDsTracer {
         LaunchingConnector conn = Bootstrap.virtualMachineManager().defaultConnector();
         Map<String, Connector.Argument> a = conn.defaultArguments();
         a.get("main").setValue(mainClass);
-        a.get("options").setValue("-cp " + cp);
+        // Heap cap for the student JVM (the sandbox gives the JVM no RLIMIT_AS).
+        a.get("options").setValue("-Xmx256m -cp " + cp);
         VirtualMachine vm = conn.launch(a);
 
         // Drain the target's stdout so we can extract the result sentinel + user prints.

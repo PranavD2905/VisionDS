@@ -9,6 +9,7 @@ import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuth } from '../auth/AuthProvider';
 import { DEFAULT_LANGUAGE, langById } from '../languages';
 import { readImportFromHash, type ImportProblem } from '../lib/import';
+import { warmUp } from '../runner';
 import { useActiveTrace, useVis } from '../store';
 import { SourcePane } from '../workbench/SourcePane';
 import { StagePane } from '../workbench/StagePane';
@@ -77,6 +78,7 @@ export function WorkbenchPage() {
     };
   });
   const { language, code, cases, problem: imported } = source;
+  useEffect(() => warmUp(language), [language]);
   const view = useMemo(
     () => deriveSource(source),
     // the testcases never change what the call site resolves to

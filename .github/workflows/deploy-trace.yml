@@ -1,0 +1,52 @@
+name: Deploy trace service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/trace-service/**
+      - packages/trace-schema/**
+      - packages/entry-policy/**
+      - pnpm-lock.yaml
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-trace
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/trace-service/Dockerfile
+          tags: visionds-trace:deploy
+          load: true
+          cache-from: type=gha
+      - name: Test inside the image before shipping it
+        run: >
+          docker run --rm --cap-add NET_ADMIN --cap-add SYS_PTRACE
+          --security-opt seccomp=unconfined
+          visionds-trace:deploy node_modules/.bin/vitest run
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        run: >
+          flyctl deploy --remote-only
+          --config packages/trace-service/fly.toml
+          --dockerfile packages/trace-service/Dockerfile .
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Smoke test (wakes a suspended machine)
+        run: |
+          base="${TRACE_URL:-https://visionds-trace.fly.dev}"
+          curl -fsS --retry 5 --retry-delay 3 "$base/health"
+          curl -fsS -X POST "$base/trace" -H 'Content-Type: application/json' \
+            -d '{"language":"cpp","code":"class Solution { public: int f(int x) { return x + 1; } };","testCase":{"input":"1","expected":"2"}}' \
+            | grep -q '"verdict":"pass"'
+        env:
+          TRACE_URL: ${{ vars.TRACE_URL }}
