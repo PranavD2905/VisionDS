@@ -1,4 +1,5 @@
-import type { Entry, TestCase } from '@visionds/trace-schema';
+import type { Candidate } from '@visionds/entry-policy';
+import type { JsonValue } from '@visionds/trace-schema';
 
 /** How to launch the language's stepper; it prints the raw StepperOutput JSON. */
 export interface StepperCommand {
@@ -17,15 +18,10 @@ export interface PreparedProgram {
 export interface LanguageAdapter {
   language: string;
   /**
-   * Compile student code + the (default or student-edited) system code/entry
-   * against a testcase, and return how to step it.
+   * Compile the student's code with the call site and this testcase's parsed
+   * arguments, and return how to step it. `entry` is the candidate the call
+   * site was resolved to — it types the argument declarations and tells the
+   * stepper where to start. A compile error throws SubmissionError.
    */
-  prepare(studentCode: string, systemCode: string, entry: Entry, testCase: TestCase): PreparedProgram;
+  prepare(studentCode: string, callSite: string, entry: Candidate, args: JsonValue[]): PreparedProgram;
 }
-
-/**
- * A problem with the student's submission (compile error, no entry point, bad
- * input) — as opposed to an internal failure. The service turns this into an
- * `error` verdict trace rather than a 500.
- */
-export class TraceUserError extends Error {}

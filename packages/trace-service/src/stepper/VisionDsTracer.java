@@ -11,7 +11,10 @@ import java.util.*;
  * object on stdout — the same step shape the other runners produce: one snapshot
  * per executed line, each with capped, kind-tagged local-variable values.
  *
- * Args: <targetClasspath> <mainClass> <entryClass> <entryMethod> <studentStart> <capsJson>
+ * Args: <targetClasspath> <mainClass> <entryClass> <entryMethod> <entryArity> <studentStart> <capsJson>
+ *
+ * The entry is matched by name *and* argument count, so an overload the call
+ * site did not resolve to is never the one traced.
  */
 public class VisionDsTracer {
     static int MAX_STEPS = 10_000, MAX_ITEMS = 100, MAX_STRLEN = 200, MAX_DEPTH = 3, WALL_MS = 5_000;
@@ -19,8 +22,9 @@ public class VisionDsTracer {
 
     public static void main(String[] args) throws Exception {
         String cp = args[0], mainClass = args[1], entryClass = args[2], entryMethod = args[3];
-        int studentStart = Integer.parseInt(args[4]);
-        if (args.length > 5) applyCaps(args[5]);
+        int entryArity = Integer.parseInt(args[4]);
+        int studentStart = Integer.parseInt(args[5]);
+        if (args.length > 6) applyCaps(args[6]);
 
         LaunchingConnector conn = Bootstrap.virtualMachineManager().defaultConnector();
         Map<String, Connector.Argument> a = conn.defaultArguments();
@@ -55,10 +59,11 @@ public class VisionDsTracer {
             try { es = q.remove(); } catch (VMDisconnectedException e) { break; }
             for (Event ev : es) {
                 if (ev instanceof MethodEntryEvent me && step == null) {
-                    if (me.method().name().equals(entryMethod)) {
+                    if (me.method().name().equals(entryMethod)
+                            && me.method().argumentTypeNames().size() == entryArity) {
                         ThreadReference t = me.thread();
                         baseFrames = t.frameCount();
-                        steps.add(snapshot(t, entryClass, studentStart, baseFrames));
+                        addStep(steps, snapshot(t, entryClass, studentStart, baseFrames));
                         step = erm.createStepRequest(t, StepRequest.STEP_LINE, StepRequest.STEP_INTO);
                         for (String ex : new String[]{"java.*", "javax.*", "sun.*", "jdk.*", "com.sun.*", "Main", "VisionDsTracer"})
                             step.addClassExclusionFilter(ex);
@@ -68,7 +73,7 @@ public class VisionDsTracer {
                     }
                 } else if (ev instanceof StepEvent se) {
                     if (isStudent(se.location().declaringType().name(), entryClass)) {
-                        steps.add(snapshot(se.thread(), entryClass, studentStart, baseFrames));
+                        addStep(steps, snapshot(se.thread(), entryClass, studentStart, baseFrames));
                         if (steps.size() >= MAX_STEPS) { limit = "steps"; break outer; }
                         if (System.currentTimeMillis() - start > WALL_MS) { limit = "time"; break outer; }
                     }
@@ -102,11 +107,43 @@ public class VisionDsTracer {
         System.out.println(out);
     }
 
+    /** A failed snapshot is dropped, never recorded as a made-up line-1 step. */
+    static void addStep(List<String> steps, String step) {
+        if (step != null) steps.add(step);
+    }
+
     static boolean isStudent(String cls, String entryClass) {
         return cls.equals(entryClass) || cls.startsWith(entryClass + "$");
     }
 
     // --------------------------------------------------------- snapshot
+
+    // Frame activations, outermost first. A frame keeps its id while it and
+    // every frame beneath it are unchanged between steps; a method re-entered
+    // after a return gets a new id because the caller's own step lands between.
+    static List<String> activeMethods = new ArrayList<>();
+    static List<Integer> activeIds = new ArrayList<>();
+    static int nextFrameId = 0;
+
+    static int[] frameIds(ThreadReference t, int baseFrames) throws IncompatibleThreadStateException {
+        int depth = Math.max(0, t.frameCount() - baseFrames);
+        List<String> methods = new ArrayList<>();
+        for (int i = depth; i >= 0; i--) {
+            Method m = t.frame(i).location().method();
+            methods.add(m.name() + m.signature());
+        }
+        int[] ids = new int[methods.size()];
+        List<Integer> kept = new ArrayList<>();
+        boolean same = true;
+        for (int d = 0; d < methods.size(); d++) {
+            same = same && d < activeMethods.size() && activeMethods.get(d).equals(methods.get(d));
+            ids[d] = same ? activeIds.get(d) : nextFrameId++;
+            kept.add(ids[d]);
+        }
+        activeMethods = methods;
+        activeIds = kept;
+        return ids;
+    }
 
     static String snapshot(ThreadReference t, String entryClass, int studentStart, int baseFrames) {
         StringBuilder sb = new StringBuilder("{");
@@ -114,32 +151,50 @@ public class VisionDsTracer {
             StackFrame f = t.frame(0);
             int line = f.location().lineNumber() - studentStart + 1;
             int depth = Math.max(0, t.frameCount() - baseFrames);
+            int[] ids = frameIds(t, baseFrames);
             sb.append("\"index\":0,\"line\":").append(line).append(",\"event\":\"line\",\"callDepth\":").append(depth);
             sb.append(",\"func\":").append(jsonStr(f.location().method().name()));
-            sb.append(",\"stdout\":\"\",\"locals\":[");
-            boolean first = true;
-            Set<String> seen = new HashSet<>();
-            List<LocalVariable> vars;
-            try { vars = f.visibleVariables(); } catch (AbsentInformationException e) { vars = Collections.emptyList(); }
-            for (LocalVariable v : vars) {
-                String name = v.name();
-                if (name.startsWith("$") || !seen.add(name)) continue;
-                Value val = f.getValue(v);
-                boolean[] trunc = {false};
-                String kind = kindOf(val);
-                String json = convert(val, 0, trunc);
-                if (!first) sb.append(",");
-                first = false;
-                sb.append("{\"name\":").append(jsonStr(name)).append(",\"kind\":").append(jsonStr(kind))
-                  .append(",\"value\":").append(json);
-                if (trunc[0]) sb.append(",\"truncated\":true");
-                sb.append("}");
+            sb.append(",\"frameId\":").append(ids[ids.length - 1]);
+            sb.append(",\"stdout\":\"\",\"locals\":").append(locals(f, false));
+            if (depth >= 1 && ids.length >= 2) {
+                StackFrame c = t.frame(1);
+                if (isStudent(c.location().declaringType().name(), entryClass)) {
+                    sb.append(",\"caller\":{\"func\":").append(jsonStr(c.location().method().name()))
+                      .append(",\"frameId\":").append(ids[ids.length - 2])
+                      .append(",\"locals\":").append(locals(c, true)).append("}");
+                }
             }
-            sb.append("]");
         } catch (Exception e) {
-            sb.append("\"index\":0,\"line\":1,\"event\":\"line\",\"callDepth\":0,\"stdout\":\"\",\"locals\":[]");
+            return null;
         }
         return sb.append("}").toString();
+    }
+
+    /** A frame's locals as a JSON array; reference values carry their object identity as `ref`. */
+    static String locals(StackFrame f, boolean structuresOnly) throws Exception {
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        Set<String> seen = new HashSet<>();
+        List<LocalVariable> vars;
+        try { vars = f.visibleVariables(); } catch (AbsentInformationException e) { vars = Collections.emptyList(); }
+        for (LocalVariable v : vars) {
+            String name = v.name();
+            if (name.startsWith("$") || !seen.add(name)) continue;
+            Value val = f.getValue(v);
+            String kind = kindOf(val);
+            if (structuresOnly && kind.equals("scalar")) continue;
+            boolean[] trunc = {false};
+            String json = convert(val, 0, trunc);
+            if (!first) sb.append(",");
+            first = false;
+            sb.append("{\"name\":").append(jsonStr(name)).append(",\"kind\":").append(jsonStr(kind))
+              .append(",\"value\":").append(json);
+            if (val instanceof ObjectReference o && !kind.equals("scalar") && !kind.equals("string"))
+                sb.append(",\"ref\":\"j").append(o.uniqueID()).append("\"");
+            if (trunc[0]) sb.append(",\"truncated\":true");
+            sb.append("}");
+        }
+        return sb.append("]").toString();
     }
 
     // --------------------------------------------------------- kinds

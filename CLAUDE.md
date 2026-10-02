@@ -52,39 +52,76 @@ pnpm workspaces monorepo:
   trace (real `call`/`return` events where a runner emits them, `callDepth`
   transitions where it only emits `line`) and reports which functions were
   observed calling themselves — mutual recursion included; every step now
-  carries an optional `func` name for it;
-  `fixtures/twoSumFail.ts` canned trace for UI work without a runner.
+  carries an optional `func` name for it; **frames** (additive fields): each
+  step's `frameId` (one per call activation), `caller` (the immediate
+  student caller's `func`/`frameId`/non-scalar locals) and each reference
+  value's `ref` (object identity — Python `id()`, lldb referent/pointee
+  address, JDI `uniqueID()`), all emitted by all three tracers; `frames.ts`
+  has `varKey(func, name)` (variables are per *function*, never by bare
+  name), `previousInFrame` (diff a step against its own frame's previous
+  step) and `aliasesOf` (caller values that are the same object as a local);
+  `inferPointerRoles` keys by `varKey`;
+  `fixtures/twoSumFail.ts` canned trace for UI work without a runner;
+  `testcase.ts` — the **one testcase parser** (JSON first, then Python
+  literals: `True`/`None`, single quotes, tuples, trailing commas; one arg per
+  line, `name =` dropped), `SubmissionError` (the user-error type every
+  package shares) and `userErrorTrace`.
+- `packages/entry-policy` — **the one entry-point rule set** (see CONTEXT.md
+  and `docs/adr/0001`). Lezer syntax trees for Python/C++/Java, pure JS, so the
+  same code runs in the browser, the Pyodide worker and the trace service.
+  `policyFor(lang)` → `analyze` (candidates = top-level functions + public
+  `Solution` methods; nested, private, `_`-prefixed, inner-class and
+  constructor functions are helpers; **roots** = candidates no other function
+  calls; **default entry** = last root `Solution` method, else last root),
+  `defaultCallSite`, and `resolveCallSite` — the entry is whatever the call
+  site calls, exactly once, with overloads split by the testcase's argument
+  count. Every failure is a `SubmissionError` (a user error, never a 500). One
+  table-driven test runs every scenario in all three languages.
 - `packages/runners` — `Runner` interface + two implementations.
   `PyodideRunner`: a Web Worker boots Pyodide (assets served locally from
   `/pyodide/` via vite-plugin-static-copy, not CDN) and runs student code
-  under `harness.py`'s `sys.settrace` tracer: LeetCode-style input parsing
-  (one arg per line, `name = literal` accepted; entry point = last top-level
-  def, else last public method of `class Solution`), capped locals snapshots,
-  stdout capture, verdict + divergence detection. Node-shaped objects are
+  under `harness.py`'s `sys.settrace` tracer: capped locals snapshots,
+  stdout capture, verdict + divergence detection. The harness detects no
+  entry point and parses no input — `invoke.ts` parses the testcase
+  (trace-schema `parseTestCase`) and resolves the call site
+  (`@visionds/entry-policy/python`, the Python grammar only, to keep the
+  worker small) and hands the harness JSON args plus any user error, which it
+  reports after a SyntaxError. The call site must assign `result`. Node-shaped objects are
   **duck-typed, never name-matched** — `val`+`left`+`right` → `tree`,
   `val`+`next` → `linkedlist` — so a student's own class name works; the walks
   are identity-tracked (a cyclic list reports `cyclesTo`) and item-capped.
   A JS-side watchdog
   (cap + 10s) terminates the worker for loops Python can't interrupt →
   clean `timeout` verdict, never a frozen tab. `ServerRunner`: POSTs
-  `{language, code, testCase}` to the trace service and schema-validates the
-  reply — same contract, different transport. `AbortSignal` supported.
+  `{language, code, systemCode, testCase}` to `/trace` and schema-validates
+  the reply — same contract, different transport. No `entry` is ever sent:
+  the call site decides it. `AbortSignal` supported.
 - `packages/trace-service` — Node/TS server (run with `tsx`) that traces
   compiled languages under a debugger, emitting the identical
   `ExecutionTrace`. `POST /trace`. Pluggable `LanguageAdapter` seam: each
   adapter compiles a harness + returns a `StepperCommand` the generalized
-  runner spawns (`trace.ts`). Shared caps (`caps.ts`), entry-point rule, and
-  LeetCode input parsing. **C++** (`adapters/cpp`): one translation unit
-  (prelude + student code at known lines + a `main` building typed args and
-  JSON-serializing the result via a sentinel), compiled `clang++ -g`, stepped
+  runner spawns (`trace.ts`). `traceCase` = parse testcase → resolve the call
+  site via the entry policy → `adapter.prepare(code, callSite, entry, args)`
+  → step → assemble; every `SubmissionError` (no entry, bad call site, bad
+  testcase, arity mismatch, compile error) is a 200 with an `error` verdict
+  echoing `systemCode`/`entry`. There is no `/system-code` endpoint — call
+  sites are generated client-side. **C++** (`adapters/cpp`): one translation
+  unit (prelude + student code at known lines + a `main` that declares the
+  typed args `a0..an`, runs the call site, and prints `result` via a
+  sentinel — no marker comment to break), compiled `clang++ -g`, stepped
   by `stepper/lldb_stepper.py` (the `sys.settrace` analog) which reads locals
   as structured kind-tagged values (`vector`→array, `unordered_map`→dict,
   stack/queue via the underlying container, ListNode/TreeNode→linkedlist/tree),
-  hides pre-declaration garbage, climbs out of STL frames. **Java**
+  hides pre-declaration garbage, climbs out of STL frames. It breaks on the
+  entry by name *within the student's lines of the program's own module*,
+  nearest the entry's line (a bare-name breakpoint used to hit same-named
+  libc++ symbols and record nothing). **Java**
   (`adapters/java`): writes Solution.java (imports + student) + Main.java (arg
   building + result serialization + ListNode/TreeNode defs), compiles `javac
   -g`, stepped by `stepper/VisionDsTracer.java` — a JDI debugger program (the
-  Java analog) that class-exclusion-filters to the student's code and reads
+  Java analog; matches the entry by name + arity so overloads are exact, and
+  its compiled class is cached per source hash) that class-exclusion-filters
+  to the student's code and reads
   primitives/String/arrays/List/HashMap/HashSet/ListNode/TreeNode. Needs a JDK
   (auto-detected, or `VISIONDS_JAVA_HOME`). Runs student code → sandbox before
   any non-local deployment.
@@ -191,13 +228,26 @@ pnpm workspaces monorepo:
   **The workbench** (`src/workbench/`) is a two-pane split: `SourcePane`
   (language, editor, testcases, run) and `StagePane` (verdict, diagrams,
   narration, transport), with `useRun` holding the run flow and `WorkbenchPage`
-  owning only the source state. That state is mirrored to localStorage by
-  `workbench/draft.ts` and restored as the initial state, so a refresh keeps
-  the student's code, testcases, language and system-code strip instead of
-  resetting to the two-sum starter; `#import=`, history re-open and extension
+  owning only layout and wiring. The source lives in `workbench/source.ts`: a
+  **pure reducer** (`load`/`editCode`/`editCases`/`editCallSite`/`pickEntry`/
+  `resetCallSite`) over `{language, code, cases, callSite, problem}`, where
+  `callSite` is a *choice* — `auto` (default entry), `picked` (a candidate,
+  regenerated on code edits, lapsing to auto if it disappears) or `edited`
+  (the student's text, never touched). `deriveSource` computes the call-site
+  text, the entry it resolves to, the picker's options (the roots; shown only
+  when there are 2+) and any `SubmissionError` **synchronously** via the
+  entry policy — no fetch, no debounce, no "Preparing…", nothing to race. Run
+  is never blocked: a call site that can't resolve shows its problem inline
+  and runs to an `error` verdict. The state is mirrored to localStorage by
+  `workbench/draft.ts` (key `…draft.v2`; a v1 draft keeps its code and cases,
+  its call site resets to auto) and restored as the initial state, so a
+  refresh keeps the student's code, testcases, language and call-site choice
+  — a pick survives a reload; `#import=`, history re-open and extension
   captures still win, since they `load()` from effects that run after initial
   state is set. `readDraft` never throws — blocked storage, corrupt JSON, an
   empty draft or an unknown language id all fall back to the starter.
+  `apps/web` has unit tests (`source.test.ts`: reducer, pick races, draft
+  round-trip) via its own `vitest.config.ts`.
   There is **one copy of your code on screen**:
   the editor stays editable and marks the current step in place via
   `editorActiveLine.ts` (a CodeMirror decoration, so it tracks real line
@@ -208,7 +258,7 @@ pnpm workspaces monorepo:
   is a miniature of the window with a band where that region actually sits
   (code = the left column, testcases = the bottom strip — VS Code's side-bar
   and panel icons), solid when showing. Collapsing the code takes the entry
-  picker and the system-code strip with it: both are code UI, and leaving a
+  picker and the call-site strip with it: both are code UI, and leaving a
   second CodeMirror on screen made "hide the code" look broken. Collapsing one gives
   the pane to the other and drops the drag handle (no boundary left to move);
   collapsing both unmounts the source pane entirely so the stage takes the
@@ -242,6 +292,14 @@ pnpm workspaces monorepo:
   working.
   Shared playback components live in `src/components/`: Stage +
   `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips), Transport.
+  **The stage is per frame**: `prev` is `previousInFrame` (entering a helper
+  is not "every variable changed"), `inferShapes` diffs within a frame and
+  keys shapes by `varKey`, and during a helper call the caller's structures
+  sit beneath the live frame in a dimmed `.stage-caller` strip — rendered
+  through the same views but forced 2D (`Flat2D` context, so a helper call
+  never spins up extra WebGL scenes) and in its own `LayoutGroup id` so
+  same-named cells never glide between frames. An alias is drawn once, live
+  in the helper, with a `nums ↗ arr` chip in the strip.
   **Every structure kind has a 3D scene** (`stage/three/`, react-three-fiber),
   one metaphor per kind: array/string = block rail (height encodes numeric
   value, uniform tiles otherwise; swap arcs on two lanes so passing blocks
@@ -310,9 +368,10 @@ pnpm workspaces monorepo:
 
 ```sh
 pnpm install
-pnpm dev        # web app on http://localhost:5173
-pnpm --filter @visionds/trace-service dev   # C++/Java trace service on :8787 (needs clang++/lldb; JDK for Java)
-pnpm test       # vitest: schema + explainer + auth + Pyodide tracer + C++/Java trace-service
+pnpm dev        # web app on :5173 + C++/Java trace service on :8787, together (Ctrl+C stops both)
+pnpm dev:web    # web app only — enough for Python, which runs in the browser
+pnpm --filter @visionds/trace-service dev   # trace service only (needs clang++/lldb; JDK for Java)
+pnpm test       # vitest: schema + entry-policy + explainer + auth + Pyodide tracer + C++/Java trace-service + web
 pnpm typecheck  # tsc --noEmit across all packages
 pnpm build      # production build (web)
 
@@ -323,6 +382,11 @@ pnpm --filter @visionds/extension build   # esbuild the extension → apps/exten
 
 The web app finds the service at `VITE_TRACE_SERVICE` (default
 `http://localhost:8787`); C++/Java runs need it up, Python does not.
+`pnpm dev` runs both through `pnpm --parallel`, which stops the pair if
+either fails to start. A busy port is the usual cause — another worktree's
+service still on :8787 — and the service now says so in one line instead of a
+stack trace. Run a second copy with `PORT=<port>` plus a matching
+`VITE_TRACE_SERVICE`; Vite moves to the next free port on its own.
 
 ## Status (2026-07-22)
 
@@ -422,6 +486,24 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   recursion). Typecheck, prod build and all 60 tests pass. **Not yet exercised
   in a real browser** — the Chrome extension was not connected this session,
   so the reveal choreography and auto-pan are visually unverified.
+- Done & verified (2026-10-02): **multiple entry points, reworked** (branch
+  `feat/multiple-entry-points`, CONTEXT.md + `docs/adr/0001`). One
+  `@visionds/entry-policy` (Lezer, all three languages) replaced four or five
+  disagreeing detectors; the call site decides the entry everywhere; one
+  testcase parser; every submission problem is an `error` verdict;
+  `/system-code` and the request-level `entry` are gone; the workbench source
+  is a pure reducer with a derived call site (picks persist, no "Preparing…");
+  the stage is frame-aware with a caller strip and aliases. Fixed en route: a
+  helper written after the entry became the default (all languages); nested
+  Python closures became candidates; the C++ bare-name breakpoint hit libc++
+  symbols and recorded zero steps (`add(int,int)` now traces); Java traced
+  the wrong overload and emitted line-1 garbage steps; the synthetic C++/Java
+  return step opened a bogus call-tree root after a helper. 239 unit tests,
+  typecheck and prod build pass; verified in a headless browser on live runs
+  (Python two-problem file + helper, picker persistence across reload, a
+  broken call site's inline problem, a C++ run through the service, and the
+  caller strip with a `nums ↗ arr` alias). Scrub animation smoothness was not
+  judged (headless).
 - Not built yet: production sandbox for the trace service, Claude explainer
   option, graph/adjacency visualization. Known minor: bundling supabase-js grew
   the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.

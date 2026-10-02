@@ -1,13 +1,11 @@
-import type { CppEntry, JsonValue, TestCase } from '@visionds/trace-schema';
-import { extractSignature, findCppEntry, listCppEntryCandidates, resolveEntryPick } from '@visionds/trace-schema';
-import { parseArgs } from '../../parseInput';
+import type { Candidate } from '@visionds/entry-policy';
+import type { JsonValue } from '@visionds/trace-schema';
 import { cppLiteralForType, inferCppArg } from './infer';
 
 export const RESULT_SENTINEL = '__VISIONDS_RESULT__';
 
 export interface GeneratedProgram {
   source: string;
-  entry: string;
   /** 1-based line range of the student's own code within `source`. */
   studentStart: number;
   studentEnd: number;
@@ -80,71 +78,24 @@ const TREE_HELPERS = [
 ];
 
 /**
- * Build the default, student-visible/editable call-site — the region the UI
- * shows in the collapsed system-code strip. Deliberately excludes argument
- * *declarations* (`int a0 = 5;`): those are testcase-specific literal values
- * that must be regenerated fresh for every testcase a run steps through, so
- * they stay invisible boilerplate built at assemble time, never baked into
- * editable text a student could carry stale across testcases. `systemCode`
- * itself only names *which* function is called (`Solution().twoSum(a0, a1)`)
- * and how the result is serialized — stable across every testcase.
- */
-export function generateDefaultSystemCode(
-  code: string,
-  entryOverride?: CppEntry,
-): { systemCode: string; entry: CppEntry } {
-  // Never trust an override's shape blindly — it may have been resolved
-  // against a *different* language's code (e.g. a stale client-side request
-  // racing a language switch, carrying over Python's `className: null`).
-  // Re-resolving by name against this code's real candidates self-corrects
-  // a wrong className/absence, the same defense Java's equivalent already has.
-  const resolved = resolveEntryPick(listCppEntryCandidates(code), entryOverride);
-  const entry = resolved ?? findCppEntry(code);
-  const sig = extractSignature(code, entry);
-  const argCount = sig?.params.length ?? 0;
-
-  const argList = Array.from({ length: argCount }, (_, i) => `a${i}`).join(', ');
-  const call = entry.className
-    ? `${entry.className}().${entry.name}(${argList})`
-    : `${entry.name}(${argList})`;
-
-  // In-place (void) solutions: run the call, then serialize the mutated
-  // argument (the first non-const reference) as the answer to compare.
-  const isVoid = sig?.returnType === 'void';
-  const callAndResult = isVoid
-    ? [`  ${call};`, `  string __out = __vds::j(a${sig ? voidTargetIndex(sig) : 0});`]
-    : [`  auto __r = ${call};`, '  string __out = __vds::j(__r);'];
-
-  const main = [
-    'int main(){',
-    '  // ---- arguments ----',
-    ...callAndResult,
-    `  cout << "${RESULT_SENTINEL}" << __out << "\\n";`,
-    '  return 0;',
-    '}',
-  ];
-
-  return { systemCode: main.join('\n'), entry };
-}
-
-/**
  * Build a single compilable translation unit: prelude (includes, serializers,
  * and conditionally the ListNode/TreeNode structs), the student's code verbatim
- * on known line numbers, freshly-generated argument declarations for *this*
- * testcase, then node builders/serializers and the (possibly student-edited)
- * call-site from `systemCode`.
+ * on known line numbers, then a `main` that declares this testcase's
+ * arguments as `a0..an`, runs the student's call site, and prints `result`
+ * behind the sentinel.
+ *
+ * The call site is only the statements the student sees and edits (`auto
+ * result = Solution().twoSum(a0, a1);`); the declarations and the result line
+ * are wrapped around it here, so there is no marker for an edit to break.
  */
 export function assembleCppProgram(
   studentCode: string,
-  systemCode: string,
-  entry: CppEntry,
-  testCase: TestCase,
+  callSite: string,
+  entry: Candidate,
+  args: JsonValue[],
 ): GeneratedProgram {
-  const sig = extractSignature(studentCode, entry);
-  const args: JsonValue[] = parseArgs(testCase.input);
-  const useSig = sig !== null && sig.params.length === args.length;
   const decls = args.map((v, i) => {
-    const declared = useSig ? sig!.params[i]!.valueType : '';
+    const declared = entry.params[i]?.type ?? '';
     if (declared === 'ListNode') return `  ListNode* a${i} = __build_list(${intVecLiteral(v)});`;
     if (declared === 'TreeNode') return `  TreeNode* a${i} = __build_tree(${optVecLiteral(v)});`;
     if (declared) return `  ${declared} a${i} = ${cppLiteralForType(declared, v)};`;
@@ -163,23 +114,23 @@ export function assembleCppProgram(
 
   const nodeHelpers = [...(usesList ? LIST_HELPERS : []), ...(usesTree ? TREE_HELPERS : [])];
 
-  // Splice the freshly-generated decls in where the marker comment sits, so
-  // an edited call-site (different arg count) still lines up with `a0..an`.
-  const filledSystemCode = systemCode.replace('  // ---- arguments ----', decls.join('\n'));
+  const main = [
+    'int main(){',
+    ...decls,
+    ...callSite.split('\n').map((l) => `  ${l}`),
+    `  cout << "${RESULT_SENTINEL}" << __vds::j(result) << "\\n";`,
+    '  return 0;',
+    '}',
+  ];
 
   const lines: string[] = [...prelude, '// ---- student code ----'];
   const studentStart = lines.length + 1;
   const studentLines = studentCode.replace(/\n+$/, '').split('\n');
   lines.push(...studentLines);
   const studentEnd = lines.length;
-  lines.push('// ---- harness ----', ...nodeHelpers, filledSystemCode);
+  lines.push('// ---- harness ----', ...nodeHelpers, ...main);
 
-  return {
-    source: lines.join('\n') + '\n',
-    entry: entry.name,
-    studentStart,
-    studentEnd,
-  };
+  return { source: lines.join('\n') + '\n', studentStart, studentEnd };
 }
 
 /** `{1, 2, 3}` from a JSON int array (for __build_list). */
@@ -194,10 +145,4 @@ function optVecLiteral(v: JsonValue): string {
   return `{${v
     .map((x) => (x === null ? 'nullopt' : typeof x === 'number' ? String(Math.trunc(x)) : 'nullopt'))
     .join(', ')}}`;
-}
-
-/** The argument a void solution mutates: first non-const reference, else the first. */
-function voidTargetIndex(sig: { params: { mutableRef: boolean }[] }): number {
-  const idx = sig.params.findIndex((p) => p.mutableRef);
-  return idx >= 0 ? idx : 0;
 }

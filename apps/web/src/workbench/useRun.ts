@@ -57,7 +57,7 @@ export function useRun(client: AuthClient, signedIn: boolean) {
         setStatus(`Testcase ${i + 1} of ${input.cases.length}…`);
         traces.push(
           await runner.run(
-            { studentCode: input.code, systemCode: input.systemCode, entry: input.entry },
+            { studentCode: input.code, systemCode: input.systemCode },
             input.cases[i]!,
             {
               onStatus: (s) =>

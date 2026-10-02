@@ -31,77 +31,6 @@ class _Limit(Exception):
         self.kind = kind  # 'steps' | 'time'
 
 
-# ---------------------------------------------------------------- parsing
-
-def _parse_value(text):
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    try:
-        return ast.literal_eval(text)
-    except Exception:
-        raise ValueError("could not parse value: %r" % text)
-
-
-def _parse_args(input_str):
-    """One argument per line, LeetCode style. Accepts bare JSON/Python
-    literals and 'name = literal' lines."""
-    args = []
-    for line in input_str.strip().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        head, sep, tail = line.partition("=")
-        if sep and head.strip().isidentifier():
-            line = tail.strip()
-        args.append(_parse_value(line))
-    return args
-
-
-def _list_entry_candidates(tree):
-    """Every plausible entry candidate, in source order: top-level defs first,
-    then public methods of `class Solution` — the full set an ambiguous
-    submission could mean, not just the default pick."""
-    candidates = []
-    funcs = [
-        n for n in tree.body
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
-    candidates.extend((f.name, None) for f in funcs)
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "Solution":
-            methods = [
-                m for m in node.body
-                if isinstance(m, ast.FunctionDef) and not m.name.startswith("_")
-            ]
-            candidates.extend((m.name, node.name) for m in methods)
-    return candidates
-
-
-def _find_entry(tree):
-    """Last top-level def; else the last public method of `class Solution`."""
-    funcs = [c for c in _list_entry_candidates(tree) if c[1] is None]
-    if funcs:
-        return funcs[-1]
-    methods = [c for c in _list_entry_candidates(tree) if c[1] is not None]
-    if methods:
-        return methods[-1]
-    raise ValueError(
-        "no entry point found: define a top-level function or a Solution class"
-    )
-
-
-def list_entry_candidates(code):
-    """JSON-serializable candidate list, for the UI's ambiguity dropdown."""
-    tree = ast.parse(code)
-    return json.dumps([
-        {"name": name, "className": class_name}
-        for name, class_name in _list_entry_candidates(tree)
-    ])
-
-
 # ----------------------------------------------------------- serialization
 
 _BUILTIN_VALUES = (str, bytes, int, float, bool, list, tuple, dict, set, frozenset, deque)
@@ -258,15 +187,23 @@ _SKIP_TYPES = (
 )
 
 
-def _snapshot_locals(f_locals):
+def _snapshot_locals(f_locals, structures_only=False):
+    """Capped, kind-tagged snapshots. Reference values (containers, nodes)
+    carry `ref`, their object identity, so the stage can tell the caller's
+    `nums` and a helper's `arr` are one list rather than drawing a copy."""
     out = []
     for name, v in f_locals.items():
         if name.startswith("_") or name == "self":
             continue
         if isinstance(v, _SKIP_TYPES):
             continue
+        kind = _kind_of(v)
+        if structures_only and kind == "scalar":
+            continue
         state = {"truncated": False}
-        snap = {"name": name, "kind": _kind_of(v), "value": _convert(v, 0, state)}
+        snap = {"name": name, "kind": kind, "value": _convert(v, 0, state)}
+        if kind not in ("scalar", "string"):
+            snap["ref"] = "py%x" % id(v)
         if state["truncated"]:
             snap["truncated"] = True
         out.append(snap)
@@ -284,6 +221,16 @@ class _Tracer:
         self.limit = None
         self._last_stdout = ""
         self._stdout_capped = False
+        # frame object -> activation id, for frames still on the stack
+        self._frame_ids = {}
+        self._next_frame_id = 0
+
+    def _frame_id(self, frame):
+        fid = self._frame_ids.get(frame)
+        if fid is None:
+            fid = self._frame_ids[frame] = self._next_frame_id
+            self._next_frame_id += 1
+        return fid
 
     def _stdout(self):
         if self._stdout_capped:
@@ -309,13 +256,22 @@ class _Tracer:
             "event": event,
             "locals": _snapshot_locals(frame.f_locals),
             "func": frame.f_code.co_name,
+            "frameId": self._frame_id(frame),
             "stdout": self._stdout(),
             "callDepth": self.depth,
         }
+        caller = frame.f_back
+        if caller is not None and caller.f_code.co_filename == STUDENT_FILE:
+            step["caller"] = {
+                "func": caller.f_code.co_name,
+                "frameId": self._frame_id(caller),
+                "locals": _snapshot_locals(caller.f_locals, structures_only=True),
+            }
         if event == "return":
             state = {"truncated": False}
             step["returnValue"] = _convert(arg, 0, state)
             self.depth -= 1
+            self._frame_ids.pop(frame, None)
         elif event == "exception":
             exc_type, exc_value, _tb = arg
             step["exception"] = {
@@ -351,20 +307,18 @@ def _norm(v):
 
 # -------------------------------------------------------------- entry point
 
-def default_system_code(entry_name, class_name):
-    """The student-visible/editable call-site: imports (none needed by
-    default) + a call into the detected entry, built from parsed args.
-    `class_name` is an empty string (not None) when there is no class — JS
-    `null` crossing the Pyodide FFI as a bare argument doesn't reliably
-    become Python `None`."""
-    if not class_name:
-        call = "%s(*__vds_args__)" % entry_name
-    else:
-        call = "%s().%s(*__vds_args__)" % (class_name, entry_name)
-    return "result = %s" % call
+_MISSING = object()
 
 
-def run_case(system_code, student_code, input_str, expected_str, caps_json):
+def run_case(
+    system_code, student_code, input_str, expected_str,
+    args_json, expected_json, submission_error, caps_json,
+):
+    """Trace one testcase. The testcase is parsed and the call site resolved
+    on the TypeScript side (@visionds/entry-policy, trace-schema's parser), so
+    every language shares one set of rules; `args_json`/`expected_json` are
+    the parsed values and `submission_error` is that side's user error, if
+    any — reported after a SyntaxError, which is the more useful message."""
     caps = json.loads(caps_json)
     for name in (
         "MAX_STEPS", "MAX_COLLECTION_ITEMS", "MAX_STRING_LEN",
@@ -392,11 +346,10 @@ def run_case(system_code, student_code, input_str, expected_str, caps_json):
         ast.parse(student_code)
     except SyntaxError as e:
         return finish("error", message="SyntaxError: %s" % e)
-    try:
-        args = _parse_args(input_str)
-        expected = _parse_value(expected_str)
-    except ValueError as e:
-        return finish("error", message=str(e))
+    if submission_error:
+        return finish("error", message=submission_error)
+    args = json.loads(args_json)
+    expected = json.loads(expected_json)
 
     g = {"__name__": "__main__"}
     try:
@@ -417,10 +370,11 @@ def run_case(system_code, student_code, input_str, expected_str, caps_json):
             call_code = compile(system_code, SYSTEM_FILE, "exec")
         except SyntaxError as e:
             return finish("error", message="error in generated call: SyntaxError: %s" % e)
+        before = g.get("result", _MISSING)
         sys.settrace(tracer)
         try:
             exec(call_code, g)
-            ret = g.get("result")
+            ret = g.get("result", _MISSING)
         except _Limit as e:
             tracer.limit = tracer.limit or e.kind
         except BaseException as e:
@@ -446,6 +400,15 @@ def run_case(system_code, student_code, input_str, expected_str, caps_json):
             else "time limit (%d ms) exceeded" % WALL_CLOCK_MS
         )
         return finish("timeout", message=reason, **kw)
+
+    if exc is None and ret is _MISSING and before is _MISSING:
+        return finish(
+            "error",
+            message="The call site must assign the answer to `result`, "
+            "e.g. result = Solution().twoSum(*__vds_args__)",
+        )
+    if ret is _MISSING:
+        ret = before
 
     if exc is not None:
         prefix = "error in generated call: " if call_site_broken else ""

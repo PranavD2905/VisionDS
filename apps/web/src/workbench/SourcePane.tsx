@@ -9,18 +9,17 @@ import { activeLineExtension, showActiveLine } from '../editorActiveLine';
 import { editorTheme } from '../editorTheme';
 import { LANGUAGES, langById } from '../languages';
 import { useTheme } from '../theme/useTheme';
+import { entryLabel, type SourceView } from './source';
 
 const LANG_MODE = { cpp, java, python } as const;
 
 export interface SourcePaneProps {
   language: string;
   code: string;
-  /** The generated, editable wiring (imports/call-site) — collapsed by default. */
-  systemCode: string;
-  /** Entry candidates found at load time; the picker only shows when there's real ambiguity. */
-  candidates: Entry[];
-  /** The entry the current `systemCode` was actually generated for. */
-  entry: Entry | undefined;
+  /** The call site, its entry point and the picker's options, derived from the source. */
+  source: SourceView;
+  /** The student wrote the call site themselves (so offer to reset it). */
+  callSiteEdited: boolean;
   cases: TestCase[];
   /** A run is in flight. Run itself lives beside the verdict in the stage pane. */
   busy: boolean;
@@ -38,7 +37,8 @@ export interface SourcePaneProps {
   casesOpen: boolean;
   onLanguage: (id: string) => void;
   onCode: (code: string) => void;
-  onSystemCode: (code: string) => void;
+  onCallSite: (text: string) => void;
+  onResetCallSite: () => void;
   onPickEntry: (entry: Entry) => void;
   onCases: (update: (cases: TestCase[]) => TestCase[]) => void;
   onDemo?: () => void;
@@ -55,9 +55,8 @@ export interface SourcePaneProps {
 export function SourcePane({
   language,
   code,
-  systemCode,
-  candidates,
-  entry,
+  source,
+  callSiteEdited,
   cases,
   busy,
   error,
@@ -70,7 +69,8 @@ export function SourcePane({
   casesOpen,
   onLanguage,
   onCode,
-  onSystemCode,
+  onCallSite,
+  onResetCallSite,
   onPickEntry,
   onCases,
   onDemo,
@@ -96,8 +96,9 @@ export function SourcePane({
     ],
     [language, theme],
   );
-  // -1 while a rescan is in flight and the entry is momentarily unknown; the
-  // select then shows no option rather than silently naming the wrong one.
+  // -1 when the call site resolves to nothing; the select then shows no
+  // option rather than naming a function that won't run.
+  const { candidates, entry } = source;
   const selectedEntryIndex = entry
     ? candidates.findIndex((c) => c.name === entry.name && c.className === entry.className)
     : -1;
@@ -134,14 +135,13 @@ export function SourcePane({
       {/* The entry picker and the system-code strip are code UI too — a second
           CodeMirror left on screen is why hiding "the code" never looked like
           it had worked. They collapse with the editor. */}
-      {codeOpen && candidates.length >= 2 && (
+      {codeOpen && source.showPicker && (
         <div className="entry-picker">
           <label>
-            <span>Ambiguous entry point — run:</span>
-            {/* Controlled: an uncontrolled select keeps whatever the DOM last
-                showed, so after a debounced rescan re-renders the candidates it
-                could name a different function than `systemCode` was built
-                for. `entry` is the single source of truth. */}
+            <span>Run:</span>
+            {/* Controlled by the derived entry — what the call site actually
+                calls — so it can never name a different function than runs.
+                Choosing one rewrites the call site. */}
             <select
               value={selectedEntryIndex}
               onChange={(e) => {
@@ -149,26 +149,44 @@ export function SourcePane({
                 if (picked) onPickEntry(picked);
               }}
             >
+              {selectedEntryIndex === -1 && <option value={-1}>—</option>}
               {candidates.map((c, i) => (
-                <option key={`${i}:${c.className ?? ''}.${c.name}`} value={i}>
-                  {c.className ? `${c.className}.${c.name}` : c.name}
+                <option key={`${c.className ?? ''}.${c.name}`} value={i}>
+                  {entryLabel(c)}
                 </option>
               ))}
             </select>
           </label>
+          <span className="entry-picker-hint">the others run as helpers</span>
         </div>
       )}
 
       {codeOpen && (
         <details className="system-code">
-          <summary>System code (auto-generated, editable)</summary>
+          <summary>
+            Call site{callSiteEdited ? ' (edited)' : ' (auto-generated, editable)'}
+            {entry && <span className="call-site-entry"> → {entryLabel(entry)}</span>}
+          </summary>
           <CodeMirror
-            value={systemCode}
+            value={source.callSite}
             theme="none"
             extensions={extensions}
-            onChange={onSystemCode}
+            onChange={onCallSite}
           />
+          {callSiteEdited && (
+            <button className="call-site-reset" onClick={onResetCallSite}>
+              Reset to the generated call site
+            </button>
+          )}
         </details>
+      )}
+      {/* Outside the strip, so a submission that can't run says why even
+          while the strip is collapsed. Run still works and reports the same
+          message as an error verdict. */}
+      {codeOpen && source.problem && (
+        <p className="call-site-problem" role="status">
+          {source.problem}
+        </p>
       )}
 
       {/* Editor and testcases share this region, split by the drag handle.

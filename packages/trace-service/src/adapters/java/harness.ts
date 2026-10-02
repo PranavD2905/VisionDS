@@ -1,13 +1,11 @@
-import type { JavaEntry, JsonValue, TestCase } from '@visionds/trace-schema';
-import { findJavaEntry } from '@visionds/trace-schema';
-import { parseArgs } from '../../parseInput';
+import type { Candidate } from '@visionds/entry-policy';
+import type { JsonValue } from '@visionds/trace-schema';
 
 export const RESULT_SENTINEL = '__VISIONDS_RESULT__';
 
 export interface GeneratedJava {
   solution: string;
   main: string;
-  entry: string;
   /** 1-based line of the student's first line within Solution.java. */
   studentStart: number;
 }
@@ -25,55 +23,22 @@ const BUILD_TREE =
   'static TreeNode __buildTree(Integer[] xs){ if(xs.length==0||xs[0]==null) return null; TreeNode root=new TreeNode(xs[0]); java.util.Queue<TreeNode> q=new java.util.LinkedList<>(); q.add(root); int i=1; while(!q.isEmpty()&&i<xs.length){ TreeNode n=q.poll(); if(i<xs.length){ if(xs[i]!=null){ n.left=new TreeNode(xs[i]); q.add(n.left);} i++;} if(i<xs.length){ if(xs[i]!=null){ n.right=new TreeNode(xs[i]); q.add(n.right);} i++;} } return root; }';
 
 /**
- * Build the default, student-visible/editable call-site — the region the UI
- * shows in the collapsed system-code strip. Deliberately excludes argument
- * *declarations* (`int a0 = 5;`): those are testcase-specific literal values
- * that must be regenerated fresh for every testcase a run steps through, so
- * they stay invisible boilerplate built at assemble time. `systemCode` only
- * names *which* method is called and how the result is serialized — stable
- * across every testcase.
- */
-export function generateDefaultJavaSystemCode(
-  code: string,
-  entryOverride?: JavaEntry,
-): { systemCode: string; entry: JavaEntry } {
-  const entry = entryOverride ?? findJavaEntry(code);
-  const argList = entry.params.map((_, i) => `a${i}`).join(', ');
-  const isVoid = entry.returnType === 'void';
-  const callAndOut = isVoid
-    ? [
-        `    new Solution().${entry.name}(${argList});`,
-        `    String __out = __json(a${voidTargetIndex(entry.params)});`,
-      ]
-    : [
-        `    var __r = new Solution().${entry.name}(${argList});`,
-        '    String __out = __json(__r);',
-      ];
-
-  const body = [
-    '    // ---- arguments ----',
-    ...callAndOut,
-    `    System.out.println("${RESULT_SENTINEL}" + __out);`,
-  ];
-  return { systemCode: body.join('\n'), entry };
-}
-
-/**
  * Build Solution.java (imports + student code, on known lines) and Main.java
- * (invisible boilerplate + freshly-generated argument decls for *this*
- * testcase + the given call-site — the default from
- * `generateDefaultJavaSystemCode`, or whatever the student edited it to).
+ * (boilerplate + this testcase's arguments declared as `a0..an` + the
+ * student's call site + a line printing `result` behind the sentinel).
+ *
+ * The call site is only the statements the student sees and edits (`var
+ * result = new Solution().twoSum(a0, a1);`); everything around it is built
+ * here, so there is no marker for an edit to break.
  */
 export function assembleJavaProgram(
   studentCode: string,
-  systemCode: string,
-  entry: JavaEntry,
-  testCase: TestCase,
+  callSite: string,
+  entry: Candidate,
+  args: JsonValue[],
 ): GeneratedJava {
-  const args = parseArgs(testCase.input);
-  const useSig = entry.params.length === args.length;
   const decls = args.map((v, i) => {
-    const type = useSig ? entry.params[i]!.type : inferType(v);
+    const type = entry.params[i]?.type ?? inferType(v);
     if (type === 'ListNode') return `    ListNode a${i} = __buildList(new int[]${intArray(v)});`;
     if (type === 'TreeNode') return `    TreeNode a${i} = __buildTree(new Integer[]${integerArray(v)});`;
     return `    ${type} a${i} = ${javaLiteral(type, v)};`;
@@ -87,10 +52,6 @@ export function assembleJavaProgram(
   const solutionLines = [IMPORTS, ...studentCode.replace(/\n+$/, '').split('\n')];
   const solution = solutionLines.join('\n') + '\n';
 
-  // Splice the freshly-generated decls in where the marker comment sits, so
-  // an edited call-site (different arg count) still lines up with `a0..an`.
-  const filledSystemCode = systemCode.replace('    // ---- arguments ----', decls.join('\n'));
-
   const mainParts: string[] = [IMPORTS, ''];
   if (usesList && !definesList) mainParts.push(LIST_STRUCT);
   if (usesTree && !definesTree) mainParts.push(TREE_STRUCT);
@@ -100,7 +61,9 @@ export function assembleJavaProgram(
     ...(usesList ? [BUILD_LIST] : []),
     ...(usesTree ? [BUILD_TREE] : []),
     '  public static void main(String[] __args) {',
-    filledSystemCode,
+    ...decls,
+    ...callSite.split('\n').map((l) => `    ${l}`),
+    `    System.out.println("${RESULT_SENTINEL}" + __json(result));`,
     '  }',
     '}',
   );
@@ -108,7 +71,6 @@ export function assembleJavaProgram(
   return {
     solution,
     main: mainParts.join('\n') + '\n',
-    entry: entry.name,
     studentStart: 2, // one prepended IMPORTS line
   };
 }
@@ -139,11 +101,6 @@ function jsonHelper(usesList: boolean, usesTree: boolean): string[] {
     '    return __q(o.toString());',
     '  }',
   ];
-}
-
-function voidTargetIndex(params: { type: string }[]): number {
-  const idx = params.findIndex((p) => p.type.endsWith('[]') || /^List</.test(p.type));
-  return idx >= 0 ? idx : 0;
 }
 
 // ------------------------------------------------------------ literals

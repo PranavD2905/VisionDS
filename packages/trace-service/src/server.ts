@@ -1,21 +1,17 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { EntrySchema, TestCaseSchema } from '@visionds/trace-schema';
+import { TestCaseSchema } from '@visionds/trace-schema';
 import { z } from 'zod';
-import { TraceUserError } from './adapters/types';
-import { getDefaultSystemCode, supportedLanguages, traceCase } from './trace';
+import { supportedLanguages, traceCase } from './trace';
 
+/**
+ * `systemCode` is the call site; the entry point is derived from it, so a
+ * client never sends one (an old client's `entry` field is ignored).
+ */
 const RequestSchema = z.object({
   language: z.string(),
   code: z.string(),
   systemCode: z.string().optional(),
-  entry: EntrySchema.optional(),
   testCase: TestCaseSchema,
-});
-
-const SystemCodeRequestSchema = z.object({
-  language: z.string(),
-  code: z.string(),
-  entryOverride: EntrySchema.optional(),
 });
 
 const CORS = {
@@ -68,8 +64,9 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 /**
  * The trace service. One endpoint, `POST /trace`, mirrors the client-side
- * runner contract: given {language, code, testCase} it returns an
- * ExecutionTrace. Runs compilers and a debugger locally.
+ * runner contract: given {language, code, systemCode?, testCase} it returns an
+ * ExecutionTrace. Submission problems are `error` verdicts in a 200 reply;
+ * a non-2xx status means the request or the service itself was at fault. Runs compilers and a debugger locally.
  *
  * NOTE: this executes student-submitted code. For anything beyond local dev it
  * MUST run inside a locked-down sandbox (container, no network, cpu/mem/pids
@@ -84,34 +81,6 @@ export function createTraceServer(): Server {
     if (req.method === 'GET' && req.url === '/health') {
       return json(res, 200, { ok: true, languages: supportedLanguages() });
     }
-    if (req.method === 'POST' && req.url === '/system-code') {
-      try {
-        const parsed = SystemCodeRequestSchema.safeParse(await readJson(req));
-        if (!parsed.success) {
-          return json(res, 400, { error: 'invalid request', detail: parsed.error.message });
-        }
-        const { language, code, entryOverride } = parsed.data;
-        const seed = getDefaultSystemCode(language, code, entryOverride);
-        return json(res, 200, seed);
-      } catch (e) {
-        // This endpoint is pure string analysis of a submission, and failing is
-        // the *normal* outcome for an ordinary mistake ("no entry point found",
-        // an unsupported language). Reporting those as 500 makes a bad
-        // submission indistinguishable from a broken service; 500 is reserved
-        // for faults that are actually ours.
-        if (e instanceof BadRequestError) {
-          return json(res, e.status, { error: e.message, kind: 'request' });
-        }
-        if (e instanceof TraceUserError) {
-          return json(res, 422, { error: e.message, kind: 'submission' });
-        }
-        return json(res, 500, {
-          error: e instanceof Error ? e.message : String(e),
-          kind: 'service',
-        });
-      }
-    }
-
     if (req.method !== 'POST' || req.url !== '/trace') {
       return json(res, 404, { error: 'not found' });
     }
@@ -121,8 +90,8 @@ export function createTraceServer(): Server {
       if (!parsed.success) {
         return json(res, 400, { error: 'invalid request', detail: parsed.error.message });
       }
-      const { language, code, systemCode, entry, testCase } = parsed.data;
-      const trace = traceCase(language, code, testCase, systemCode, entry);
+      const { language, code, systemCode, testCase } = parsed.data;
+      const trace = traceCase(language, code, testCase, systemCode);
       return json(res, 200, trace);
     } catch (e) {
       if (e instanceof BadRequestError) {

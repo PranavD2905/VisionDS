@@ -170,7 +170,21 @@ def _convert(v, depth, state):
     return _scalar_from_str(val)
 
 
-def _snapshot(frame, cur_line):
+def _ref(v):
+    """Object identity for the stage's alias detection: a reference or pointer
+    names the object it refers to, anything else its own storage. A helper's
+    `vector<int>& arr` and the caller's `nums` then share one ref."""
+    t = v.GetType()
+    if t.IsReferenceType():
+        addr = v.Dereference().GetLoadAddress()
+    elif t.IsPointerType():
+        addr = v.GetValueAsUnsigned()
+    else:
+        addr = v.GetLoadAddress()
+    return "c%x" % addr if addr and addr != lldb.LLDB_INVALID_ADDRESS else None
+
+
+def _snapshot(frame, cur_line, structures_only=False):
     out = []
     seen = set()
     for v in frame.GetVariables(True, True, False, True):  # args, locals, no statics, in scope
@@ -191,7 +205,13 @@ def _snapshot(frame, cur_line):
         seen.add(name)
         state = {"truncated": False}
         kind, value = _kind_value(v, state)
+        if structures_only and kind == "scalar":
+            continue
         snap = {"name": name, "kind": kind, "value": value}
+        if kind not in ("scalar", "string"):
+            ref = _ref(v)
+            if ref:
+                snap["ref"] = ref
         if state["truncated"]:
             snap["truncated"] = True
         out.append(snap)
@@ -273,13 +293,47 @@ def _func_name(frame):
     return name.split("(")[0].split("::")[-1].strip()
 
 
+def _break_on_entry(target, entry, entry_line, student_start, student_end):
+    """Break on the student's own `entry` and nothing else.
+
+    A bare-name breakpoint also matches every same-named symbol in the binary
+    and the libraries it loads — `merge`, `rotate`, `add` all exist in libc++
+    — and stopping in one of those first left the stepper climbing out of
+    library code until the step cap, with zero student steps recorded. By
+    name (so lldb still skips the prologue and arguments are readable), then
+    every location outside the student's lines is disabled; of the rest, only
+    the overload starting nearest `entry_line` stays on.
+    """
+    # Scoped to the program's own module: library locations resolve lazily
+    # after launch and would otherwise appear enabled.
+    bp = target.BreakpointCreateByName(entry, target.GetExecutable().GetFilename())
+    student = []
+    for loc in bp:
+        line = loc.GetAddress().GetLineEntry().GetLine()
+        if student_start <= line <= student_end:
+            student.append(loc)
+        else:
+            loc.SetEnabled(False)
+    if len(student) > 1:
+        def start_line(loc):
+            fn = loc.GetAddress().GetFunction()
+            return fn.GetStartAddress().GetLineEntry().GetLine() if fn.IsValid() else 0
+        keep = min(student, key=lambda loc: abs(start_line(loc) - entry_line))
+        for loc in student:
+            if loc is not keep:
+                loc.SetEnabled(False)
+
+
 def main():
     binary = sys.argv[1]
     student_start = int(sys.argv[2])
     student_end = int(sys.argv[3])
     entry = sys.argv[4]
-    if len(sys.argv) > 5:
-        CAPS.update(json.loads(sys.argv[5]))
+    # 1-based line of the entry's name in the generated file; picks the right
+    # overload when several student functions share the entry's name.
+    entry_line = int(sys.argv[5])
+    if len(sys.argv) > 6:
+        CAPS.update(json.loads(sys.argv[6]))
 
     def in_student(frame):
         le = frame.GetLineEntry()
@@ -294,7 +348,7 @@ def main():
     if not target:
         print(json.dumps({"error": "could not load target"}))
         return
-    target.BreakpointCreateByName(entry)
+    _break_on_entry(target, entry, entry_line, student_start, student_end)
 
     err = lldb.SBError()
     launch_info = lldb.SBLaunchInfo([])
@@ -310,9 +364,36 @@ def main():
     thread = proc.GetSelectedThread()
     base_frames = [None]  # frame count at the entry, so callDepth is relative to it
 
+    # Frame activations, outermost first: [(cfa, func, id)]. A frame keeps its
+    # id while it and every frame beneath it are unchanged between steps; a
+    # helper re-entered at the same stack address after a return gets a new id
+    # because the caller's own step lands in between.
+    active = []
+    next_id = [0]
+
+    def frame_ids():
+        frames = []
+        for i in range(thread.GetNumFrames()):
+            f = thread.GetFrameAtIndex(i)
+            if not in_student(f):
+                break
+            frames.append((f.GetCFA(), _func_name(f)))
+        frames.reverse()
+        ids = []
+        for depth, (cfa, func) in enumerate(frames):
+            kept_below = depth == 0 or ids[depth - 1] == active[depth - 1][2]
+            if kept_below and depth < len(active) and active[depth][:2] == (cfa, func):
+                ids.append(active[depth][2])
+            else:
+                ids.append(next_id[0])
+                next_id[0] += 1
+        active[:] = [(c, f, i) for (c, f), i in zip(frames, ids)]
+        return ids
+
     def emit(event, extra=None):
         frame = thread.GetFrameAtIndex(0)
         line = frame.GetLineEntry().GetLine()
+        ids = frame_ids()
         step = {
             "index": len(steps),
             "line": line - student_start + 1,  # map back to student-file coords
@@ -322,6 +403,15 @@ def main():
             "stdout": "",
             "callDepth": max(0, thread.GetNumFrames() - base_frames[0]),
         }
+        if ids:
+            step["frameId"] = ids[-1]
+        caller = thread.GetFrameAtIndex(1)
+        if len(ids) >= 2 and caller.IsValid() and in_student(caller):
+            step["caller"] = {
+                "func": _func_name(caller),
+                "frameId": ids[-2],
+                "locals": _snapshot(caller, caller.GetLineEntry().GetLine(), structures_only=True),
+            }
         if extra:
             step.update(extra)
         steps.append(step)
@@ -365,8 +455,11 @@ def main():
             proc.Continue()
             break
         else:
-            # Haven't reached student code yet — advance toward it.
-            thread.StepOut()
+            # Before the entry the only stops are breakpoint hits, and every
+            # breakpoint location outside the student's lines is disabled —
+            # run on to the entry rather than stepping out of whatever this is
+            # (stepping out of main ends the program with nothing recorded).
+            proc.Continue()
 
     stdout = proc.GetSTDOUT(1 << 16) or ""
     result_json = None

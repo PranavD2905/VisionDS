@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@visionds/entry-policy": "workspace:*",
     "@visionds/trace-schema": "workspace:*",
     "zod": "^4.4.3"
   },
