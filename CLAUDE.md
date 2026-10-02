@@ -406,7 +406,8 @@ Trace-service hardening (all env-driven, dev defaults unchanged):
   `CLIENT_IP_HEADER`), `originMatcher` (`ALLOWED_ORIGINS`; unset = `*`). Never
   allow `https://*.vercel.app` — anyone can deploy there.
 - `sandbox.ts` — on only when `VISIONDS_SANDBOX_USER` is set (the image sets
-  it): compile *and* step run as `prlimit … -- setpriv --reuid=sandbox …`,
+  it): compile *and* step run as `unshare --pid … -- prlimit … -- setpriv
+  --reuid=sandbox …` (a PID namespace per run, so nothing outlives it),
   env scrubbed (`childEnv`, never `process.env`). The entrypoint installs an
   iptables owner-match REJECT for that uid (loopback allowed for JDI, the
   service port blocked) and **fails closed** if it can't. The server stays
@@ -421,11 +422,22 @@ inside the prod image with sandbox on), `deploy-trace.yml` (test image →
 zip with `VISIONDS_SITE_URL`/Supabase vars). Supabase migrations are pushed by
 hand, never from CI.
 
-Status (2026-10-02): code + config written; local typecheck, all tests, prod
-build, and a live server check pass (health stays sub-ms under load; past the
-queue → 429). **The image has never been built** (local Docker daemon was
-down) — the first `ci.yml` run is its first Linux/lldb/sandbox test. Nothing
+Status (2026-10-02): CI green on PR #8 — the image builds and all 42
+trace-service tests pass inside it with the sandbox on (egress blocked, env
+hidden, root files unreadable, memory capped, fork bomb fully reaped). Nothing
 is provisioned yet (Fly app, Vercel project, Supabase prod, DNS, Web Store).
+
+Debian/image gotchas the first Linux runs found (all fixed in the Dockerfile
+or adapters — don't "simplify" them away):
+- the importable lldb module is `lib/python3.11/site-packages`, not
+  `python3/dist-packages` (that one is .so shims → empty namespace import);
+- `_lldb.cpython-*.so` symlinks to `liblldb.so` (a -dev file) → repointed;
+- lldb looks for `lldb-server-<full version>` → `LLDB_DEBUGSERVER_PATH`,
+  forwarded explicitly because the child env is scrubbed;
+- no locale → javac reads ASCII → both javac calls pass `-encoding UTF-8`;
+- a fork bomb's children escaped the process-group kill and held NPROC →
+  every run is `unshare --pid --fork --kill-child --mount-proc` (needs
+  SYS_ADMIN + `apparmor=unconfined` under Docker; native on Fly).
 
 ## Status (2026-07-22)
 
