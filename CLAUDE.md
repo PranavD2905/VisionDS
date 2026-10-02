@@ -368,9 +368,10 @@ pnpm workspaces monorepo:
 
 ```sh
 pnpm install
-pnpm dev        # web app on http://localhost:5173
-pnpm --filter @visionds/trace-service dev   # C++/Java trace service on :8787 (needs clang++/lldb; JDK for Java)
-pnpm test       # vitest: schema + explainer + auth + Pyodide tracer + C++/Java trace-service
+pnpm dev        # web app on :5173 + C++/Java trace service on :8787, together (Ctrl+C stops both)
+pnpm dev:web    # web app only — enough for Python, which runs in the browser
+pnpm --filter @visionds/trace-service dev   # trace service only (needs clang++/lldb; JDK for Java)
+pnpm test       # vitest: schema + entry-policy + explainer + auth + Pyodide tracer + C++/Java trace-service + web
 pnpm typecheck  # tsc --noEmit across all packages
 pnpm build      # production build (web)
 
@@ -381,6 +382,11 @@ pnpm --filter @visionds/extension build   # esbuild the extension → apps/exten
 
 The web app finds the service at `VITE_TRACE_SERVICE` (default
 `http://localhost:8787`); C++/Java runs need it up, Python does not.
+`pnpm dev` runs both through `pnpm --parallel`, which stops the pair if
+either fails to start. A busy port is the usual cause — another worktree's
+service still on :8787 — and the service now says so in one line instead of a
+stack trace. Run a second copy with `PORT=<port>` plus a matching
+`VITE_TRACE_SERVICE`; Vite moves to the next free port on its own.
 
 ## Status (2026-07-22)
 
