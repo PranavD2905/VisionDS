@@ -15,7 +15,12 @@ import { DictScene, SetScene } from './keyed';
 import { ArrayScene, QueueScene, StackScene, type Chip } from './linear';
 import { ListScene, TreeScene } from './graph';
 
-export type Stage3DProps = { width: number; height: number } & (
+export type Stage3DProps = {
+  width: number;
+  height: number;
+  /** Stop the render loop (e.g. an exhibit scrolled offscreen). */
+  paused?: boolean;
+} & (
   | { kind: 'array'; items: JsonValue[]; pointers: Chip[]; raw?: boolean }
   | { kind: 'stack'; items: JsonValue[]; pointers: Chip[] }
   | { kind: 'queue'; items: JsonValue[]; pointers: Chip[] }
@@ -68,7 +73,13 @@ export default function Stage3D(props: Stage3DProps) {
       break;
   }
   return (
-    <StageCanvas width={props.width} height={props.height} camera={rig.camera} look={rig.look}>
+    <StageCanvas
+      width={props.width}
+      height={props.height}
+      camera={rig.camera}
+      look={rig.look}
+      paused={props.paused}
+    >
       {scene}
     </StageCanvas>
   );
