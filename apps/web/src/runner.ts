@@ -21,3 +21,15 @@ export function runnerFor(language: string): Runner {
   }
   return runner;
 }
+
+// The trace service scales to zero; a suspended machine takes a moment to
+// wake. Ping it as soon as a server language is in play so it is awake by
+// the time Run is pressed. Fire-and-forget, at most once a minute.
+let lastWarm = 0;
+export function warmUp(language: string): void {
+  if (language === 'python' || Date.now() - lastWarm < 60_000) return;
+  lastWarm = Date.now();
+  fetch(`${TRACE_SERVICE_ENDPOINT.replace(/\/+$/, '')}/health`).catch(() => {
+    /* a real run reports the failure properly */
+  });
+}

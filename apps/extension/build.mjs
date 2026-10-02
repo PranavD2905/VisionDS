@@ -4,6 +4,7 @@
 // Supabase config is injected at build time from the environment (both values
 // are public-safe — RLS guards the data):
 //   VISIONDS_SUPABASE_URL, VISIONDS_SUPABASE_ANON_KEY
+// and the default site from VISIONDS_SITE_URL (unset = http://localhost:5173).
 // Leave them unset to build an auth-free extension that still does the URL-hash
 // handoff exactly as before.
 
@@ -27,6 +28,8 @@ for (const f of ['manifest.json', 'popup.html']) {
 const define = {
   __SUPABASE_URL__: JSON.stringify(process.env.VISIONDS_SUPABASE_URL ?? ''),
   __SUPABASE_ANON_KEY__: JSON.stringify(process.env.VISIONDS_SUPABASE_ANON_KEY ?? ''),
+  // The site "Open in VisionDS" targets by default, e.g. https://visionds.app.
+  __SITE_URL__: JSON.stringify(process.env.VISIONDS_SITE_URL ?? ''),
 };
 
 const options = {

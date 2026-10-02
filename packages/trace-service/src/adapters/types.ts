@@ -6,6 +6,8 @@ export interface StepperCommand {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  /** Working directory — the run's own temp dir. */
+  cwd?: string;
 }
 
 export interface PreparedProgram {
@@ -21,7 +23,12 @@ export interface LanguageAdapter {
    * Compile the student's code with the call site and this testcase's parsed
    * arguments, and return how to step it. `entry` is the candidate the call
    * site was resolved to — it types the argument declarations and tells the
-   * stepper where to start. A compile error throws SubmissionError.
+   * stepper where to start. A compile error rejects with SubmissionError.
    */
-  prepare(studentCode: string, callSite: string, entry: Candidate, args: JsonValue[]): PreparedProgram;
+  prepare(
+    studentCode: string,
+    callSite: string,
+    entry: Candidate,
+    args: JsonValue[],
+  ): Promise<PreparedProgram>;
 }

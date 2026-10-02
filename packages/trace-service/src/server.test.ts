@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTraceServer } from './server';
 
 let base: string;
-const server = createTraceServer();
+const server = createTraceServer({ log: () => {} });
 
 beforeAll(
   () =>
@@ -99,5 +99,41 @@ describe('POST /trace error classification', () => {
     const { status, json } = await post('/trace', 'nope');
     expect(status).toBe(400);
     expect(json.kind).toBe('request');
+  });
+});
+
+describe('CORS allowlist and rate limiting', () => {
+  const locked = createTraceServer({
+    allowedOrigins: ['https://visionds.app'],
+    rateLimitPerMinute: 2,
+    log: () => {},
+  });
+  let url: string;
+  beforeAll(
+    () =>
+      new Promise<void>((resolve) => {
+        locked.listen(0, '127.0.0.1', () => {
+          url = `http://127.0.0.1:${(locked.address() as AddressInfo).port}`;
+          resolve();
+        });
+      }),
+  );
+  afterAll(() => new Promise<void>((resolve) => locked.close(() => resolve())));
+
+  it('echoes an allowed origin and omits the header for any other', async () => {
+    const ok = await fetch(url + '/health', { headers: { Origin: 'https://visionds.app' } });
+    expect(ok.headers.get('access-control-allow-origin')).toBe('https://visionds.app');
+    const no = await fetch(url + '/health', { headers: { Origin: 'https://evil.example' } });
+    expect(no.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('answers 429 once a client spends its per-minute budget', async () => {
+    const body = JSON.stringify({ language: 'rust', code: '', testCase: { input: '1', expected: '1' } });
+    const statuses = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await fetch(url + '/trace', { method: 'POST', body });
+      statuses.push(r.status);
+    }
+    expect(statuses).toEqual([200, 200, 429]);
   });
 });

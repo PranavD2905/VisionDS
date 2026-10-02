@@ -1,0 +1,44 @@
+# Fly.io app for the trace service. Deploy from the REPO ROOT:
+#   flyctl deploy --config packages/trace-service/fly.toml \
+#     --dockerfile packages/trace-service/Dockerfile .
+app = "visionds-trace"
+# Pick the region nearest your students (`flyctl platform regions`).
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[env]
+  PORT = "8080"
+  # Exact origins, or `*` within one. Never `https://*.vercel.app` — anyone can
+  # deploy there; scope previews to your project's own prefix.
+  ALLOWED_ORIGINS = "https://visionds.app,https://www.visionds.app,https://visionds-*-YOUR-VERCEL-TEAM.vercel.app"
+  MAX_CONCURRENT_TRACES = "2"
+  MAX_QUEUED_TRACES = "6"
+  RATE_LIMIT_PER_MINUTE = "30"
+  CLIENT_IP_HEADER = "fly-client-ip"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Scale to zero: suspend when idle, wake on the next request. Python never
+  # touches this service; the web app pings /health when C++/Java is picked
+  # so a suspended machine is awake by the time Run is pressed.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 4
+    hard_limit = 10
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { type Candidate, policyFor } from '@visionds/entry-policy';
 import {
   ExecutionTraceSchema,
@@ -16,6 +15,8 @@ import {
 import { cppAdapter } from './adapters/cpp';
 import { javaAdapter } from './adapters/java';
 import type { LanguageAdapter, PreparedProgram } from './adapters/types';
+import { run } from './proc';
+import { childEnv } from './sandbox';
 import { valuesEqual } from './verdict';
 
 const ADAPTERS: Record<string, LanguageAdapter> = {
@@ -48,12 +49,12 @@ export function supportedLanguages(): string[] {
  * student's functions, an unparseable testcase, an argument-count mismatch, a
  * compile error — comes back as an `error` verdict, never a throw.
  */
-export function traceCase(
+export async function traceCase(
   language: string,
   code: string,
   testCase: TestCase,
   systemCode?: string,
-): ExecutionTrace {
+): Promise<ExecutionTrace> {
   const adapter = ADAPTERS[language.toLowerCase()];
   const policy = policyFor(language);
   if (!adapter || !policy) {
@@ -76,7 +77,7 @@ export function traceCase(
   const traced: Entry = { name: entry.name, className: entry.className };
   let prepared: PreparedProgram;
   try {
-    prepared = adapter.prepare(code, callSite, entry, args);
+    prepared = await adapter.prepare(code, callSite, entry, args);
   } catch (e) {
     if (!(e instanceof SubmissionError)) throw e;
     return userErrorTrace({
@@ -90,21 +91,22 @@ export function traceCase(
   }
 
   try {
-    const out = runStepper(prepared);
+    const out = await runStepper(prepared);
     return assembleTrace(language, code, testCase, out, callSite, traced, expected);
   } finally {
     prepared.cleanup();
   }
 }
 
-function runStepper(p: PreparedProgram): StepperOutput {
-  const res = spawnSync(p.stepper.command, p.stepper.args, {
-    encoding: 'utf8',
-    timeout: WALL_CLOCK_MS + 15_000, // watchdog above the in-stepper wall clock
+async function runStepper(p: PreparedProgram): Promise<StepperOutput> {
+  const res = await run(p.stepper.command, p.stepper.args, {
+    timeoutMs: WALL_CLOCK_MS + 15_000, // watchdog above the in-stepper wall clock
     maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, ...p.stepper.env },
+    env: childEnv(p.stepper.env, p.stepper.cwd),
+    cwd: p.stepper.cwd,
   });
   if (res.error) throw new Error(`stepper failed to run: ${res.error.message}`);
+  if (res.timedOut) throw new Error('stepper exceeded its watchdog and was killed');
   const stdout = (res.stdout ?? '').trim();
   if (!stdout) throw new Error(`stepper produced no output. stderr: ${res.stderr ?? ''}`);
   // The stepper prints one JSON object; ignore any leading debugger chatter.

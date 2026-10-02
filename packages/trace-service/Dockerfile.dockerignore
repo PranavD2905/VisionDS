@@ -1,0 +1,12 @@
+# BuildKit reads <Dockerfile>.dockerignore for this image (context = repo root).
+**/node_modules
+**/dist
+**/.vite
+**/coverage
+.git
+.idea
+.playwright-mcp
+*.iml
+**/.env
+**/.env.*
+apps/web/public

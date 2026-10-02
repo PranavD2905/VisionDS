@@ -388,6 +388,57 @@ service still on :8787 — and the service now says so in one line instead of a
 stack trace. Run a second copy with `PORT=<port>` plus a matching
 `VITE_TRACE_SERVICE`; Vite moves to the next free port on its own.
 
+## Deployment
+
+Web → **Vercel** (`apps/web/vercel.json`: SPA rewrite, immutable cache for
+`/assets` + `/pyodide`, CSP shipped as *Report-Only* until checked in a real
+browser). Trace service → **Fly.io** (`packages/trace-service/{Dockerfile,
+fly.toml,deploy/docker-entrypoint.sh}`), scale-to-zero (`suspend`, min 0);
+the web app's `warmUp()` (`src/runner.ts`) pings `/health` when a server
+language is selected so the machine is awake by Run. Fly because lldb/JDI need
+ptrace — Firecracker VMs allow it, gVisor-style serverless does not.
+
+Trace-service hardening (all env-driven, dev defaults unchanged):
+- `proc.ts` — async spawn in its own process group; the watchdog kills the
+  whole tree. Never reintroduce `spawnSync` — it froze every request.
+- `limits.ts` — `Gate` (`MAX_CONCURRENT_TRACES`/`MAX_QUEUED_TRACES` → 429
+  `busy`), per-client `RateLimiter` (`RATE_LIMIT_PER_MINUTE`, keyed by
+  `CLIENT_IP_HEADER`), `originMatcher` (`ALLOWED_ORIGINS`; unset = `*`). Never
+  allow `https://*.vercel.app` — anyone can deploy there.
+- `sandbox.ts` — on only when `VISIONDS_SANDBOX_USER` is set (the image sets
+  it): compile *and* step run as `unshare --pid … -- prlimit … -- setpriv
+  --reuid=sandbox …` (a PID namespace per run, so nothing outlives it),
+  env scrubbed (`childEnv`, never `process.env`). The entrypoint installs an
+  iptables owner-match REJECT for that uid (loopback allowed for JDI, the
+  service port blocked) and **fails closed** if it can't. The server stays
+  root inside the VM because setpriv needs it. The JVM gets `-Xmx`, not
+  RLIMIT_AS. `sandbox.test.ts` only runs in the image (CI).
+- The Debian lldb `-P` path is wrong; the image passes
+  `VISIONDS_LLDB_PYTHONPATH` and checks `import lldb` at build time.
+
+CI (`.github/workflows`): `ci.yml` (JS checks on ubuntu, trace-service tests
+inside the prod image with sandbox on), `deploy-trace.yml` (test image →
+`flyctl deploy` → smoke `/trace`), `release-extension.yml` (tag `ext-v*` →
+zip with `VISIONDS_SITE_URL`/Supabase vars). Supabase migrations are pushed by
+hand, never from CI.
+
+Status (2026-10-02): CI green on PR #8 — the image builds and all 42
+trace-service tests pass inside it with the sandbox on (egress blocked, env
+hidden, root files unreadable, memory capped, fork bomb fully reaped). Nothing
+is provisioned yet (Fly app, Vercel project, Supabase prod, DNS, Web Store).
+
+Debian/image gotchas the first Linux runs found (all fixed in the Dockerfile
+or adapters — don't "simplify" them away):
+- the importable lldb module is `lib/python3.11/site-packages`, not
+  `python3/dist-packages` (that one is .so shims → empty namespace import);
+- `_lldb.cpython-*.so` symlinks to `liblldb.so` (a -dev file) → repointed;
+- lldb looks for `lldb-server-<full version>` → `LLDB_DEBUGSERVER_PATH`,
+  forwarded explicitly because the child env is scrubbed;
+- no locale → javac reads ASCII → both javac calls pass `-encoding UTF-8`;
+- a fork bomb's children escaped the process-group kill and held NPROC →
+  every run is `unshare --pid --fork --kill-child --mount-proc` (needs
+  SYS_ADMIN + `apparmor=unconfined` under Docker; native on Fly).
+
 ## Status (2026-07-22)
 
 - Done & verified: monorepo, trace-schema + caps + pointer inference,

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # Everything but the trace service, which needs clang/lldb/JDK and runs
+      # in its own image below. The root is excluded too: its own `test`
+      # script is an unfiltered `pnpm -r test` that would bring it back.
+      - run: pnpm -r --workspace-concurrency=1 --filter '!@visionds/trace-service' --filter '!visionds' test
+      - run: pnpm build
+      - run: pnpm --filter @visionds/extension build
+
+  trace-service:
+    name: Trace service (in the production image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/trace-service/Dockerfile
+          tags: visionds-trace:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # Same image Fly runs, sandbox on: the entrypoint installs the egress
+      # rule, so sandbox.test.ts actually exercises it here.
+      - name: Test inside the image
+        run: >
+          docker run --rm --cap-add NET_ADMIN --cap-add SYS_PTRACE --cap-add SYS_ADMIN
+          --security-opt seccomp=unconfined --security-opt apparmor=unconfined
+          visionds-trace:ci node_modules/.bin/vitest run --no-file-parallelism
