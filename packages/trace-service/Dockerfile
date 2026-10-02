@@ -34,6 +34,15 @@ ENV VISIONDS_LLDB_PYTHONPATH=/usr/lib/llvm-${LLVM_VERSION}/lib/python3.11/site-p
     NODE_ENV=production \
     PORT=8080
 
+# Debian's _lldb extension is a symlink to liblldb.so, which only the -dev
+# package installs, so it dangles. Point it at the runtime library instead.
+RUN set -eux; \
+    lib=/usr/lib/llvm-${LLVM_VERSION}/lib; \
+    ext=$(ls "$VISIONDS_LLDB_PYTHONPATH"/lldb/_lldb.cpython-*.so); \
+    real=$(ls "$lib"/liblldb.so.* | head -n1); \
+    ls -l "$ext" "$lib"/liblldb*; \
+    ln -sf "$real" "$ext"
+
 # Fail the build, not the first request, if the debugger toolchain is broken.
 RUN PYTHONPATH="$VISIONDS_LLDB_PYTHONPATH" python3 -c "import lldb; lldb.SBDebugger.Create()" \
  && "$VISIONDS_JAVA_HOME/bin/javac" -version \
