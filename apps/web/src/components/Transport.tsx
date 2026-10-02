@@ -4,6 +4,24 @@ import { useActiveTrace, useVis } from '../store';
 const SPEEDS = [0.5, 1, 2, 4];
 const BASE_STEP_MS = 500;
 
+/**
+ * Whether the focused element handles these keys itself, so the global
+ * shortcuts must stay out of the way. The code editors are CodeMirror —
+ * a `contenteditable`, not an `<input>` — which is how arrows used to move
+ * the cursor *and* step the trace, and space was swallowed while typing.
+ * Form controls and the splitters own their keys outright; a focused
+ * button or `<summary>` only owns space (it activates itself, so playback
+ * would toggle twice) — arrows still step after clicking ▶.
+ */
+function ownsKeys(target: EventTarget | null, key: string): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target instanceof HTMLElement && target.isContentEditable) return true;
+  const editable =
+    'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor, [role="slider"], [role="separator"]';
+  if (target.closest(editable)) return true;
+  return key === ' ' && target.closest('button, a[href], summary') !== null;
+}
+
 export function Transport() {
   const trace = useActiveTrace();
   const { cursor, playing, speed, seek, stepBy, setPlaying, setSpeed } = useVis();
@@ -16,10 +34,12 @@ export function Transport() {
     return () => clearInterval(id);
   }, [playing, speed, total]);
 
-  // arrow keys step, space toggles play
+  // arrow keys step, space toggles play — but only when the keystroke isn't
+  // meant for something else on the page
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (ownsKeys(e.target, e.key)) return;
       if (e.key === 'ArrowRight') stepBy(1);
       else if (e.key === 'ArrowLeft') stepBy(-1);
       else if (e.key === ' ') {

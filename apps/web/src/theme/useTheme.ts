@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 export type ThemeName = 'specimen' | 'daylight';
 
@@ -9,6 +9,34 @@ function currentTheme(): ThemeName {
   if (typeof document === 'undefined') return 'specimen';
   return document.documentElement.dataset.theme === 'daylight' ? 'daylight' : 'specimen';
 }
+
+const serverTheme = (): ThemeName => 'specimen';
+
+/**
+ * Re-render whenever `<html data-theme>` changes — from this hook's toggle,
+ * from another tab (mirrored in through `storage`), or from anything else.
+ */
+function subscribe(onChange: () => void): () => void {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  const onStorage = (e: StorageEvent) => {
+    if (e.key !== THEME_STORAGE_KEY || !e.newValue) return;
+    document.documentElement.dataset.theme = e.newValue === 'daylight' ? 'daylight' : 'specimen';
+  };
+  window.addEventListener('storage', onStorage);
+  return () => {
+    observer.disconnect();
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+/**
+ * Resolves once React has re-rendered for a theme change. The mutation
+ * observer notifies in a microtask and the store update renders right after,
+ * so one macrotask is enough — the View Transition waits on this before it
+ * captures the new snapshot, which keeps the editor inside the wipe.
+ */
+const afterRender = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 function apply(theme: ThemeName) {
   document.documentElement.dataset.theme = theme;
@@ -31,7 +59,7 @@ interface ViewTransition {
   finished: Promise<void>;
 }
 type DocWithTransition = Document & {
-  startViewTransition?: (cb: () => void) => ViewTransition;
+  startViewTransition?: (cb: () => void | Promise<void>) => ViewTransition;
 };
 
 /**
@@ -48,20 +76,11 @@ type DocWithTransition = Document & {
  * the flourish.
  */
 export function useTheme() {
-  const [theme, setTheme] = useState<ThemeName>(currentTheme);
-
-  // adopt the theme another surface (or another tab) may have set
-  useEffect(() => {
-    setTheme(currentTheme());
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== THEME_STORAGE_KEY || !e.newValue) return;
-      const next: ThemeName = e.newValue === 'daylight' ? 'daylight' : 'specimen';
-      document.documentElement.dataset.theme = next;
-      setTheme(next);
-    };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
+  // `<html data-theme>` is the one source of truth. Each caller used to keep
+  // its own copy in state, so only the toggle's copy changed on a click — the
+  // code editor, which builds its stylesheet from `theme`, stayed in the old
+  // theme while the CSS-driven page around it switched.
+  const theme = useSyncExternalStore(subscribe, currentTheme, serverTheme);
 
   const toggle = useCallback(
     (origin?: { x: number; y: number }) => {
@@ -71,7 +90,6 @@ export function useTheme() {
 
       if (!doc.startViewTransition || reduced || !origin) {
         apply(next);
-        setTheme(next);
         return;
       }
 
@@ -84,7 +102,7 @@ export function useTheme() {
 
       const transition = doc.startViewTransition(() => {
         apply(next);
-        setTheme(next);
+        return afterRender();
       });
 
       transition.ready.then(
