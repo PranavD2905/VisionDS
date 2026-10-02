@@ -1,7 +1,8 @@
 import { aliasesOf, varKey, type TraceStep, type VarSnapshot } from '@visionds/trace-schema';
 import { AnimatePresence, LayoutGroup } from 'framer-motion';
 import type { StructShape } from '../lib/shapes';
-import { Flat2D, shapeRegistry, viewRegistry, type ViewProps } from './stage/views';
+import { Flat2D } from './stage/gate3d';
+import { shapeRegistry, viewRegistry, type ViewProps } from './stage/views';
 
 type Group = 'primary' | 'structs' | 'scalars';
 

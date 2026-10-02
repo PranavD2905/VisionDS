@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Reveal } from '../components/site/Reveal';
 import { SiteFooter, SiteNav } from '../components/site/SiteChrome';
 import { Specimen, SpecimenGrid } from '../site/Specimen';
-import { ArrayScanDemo } from '../site/demos/ArrayScanDemo';
+import { BubbleSortDemo } from '../site/demos/BubbleSortDemo';
 import { LANDING_SPECIMENS, LANGUAGE_ROWS, PIPELINE_STEPS } from '../site/content/landing';
 
 /**
@@ -46,9 +46,7 @@ export function LandingPage() {
         </div>
 
         <div className="masthead-demo">
-          <div className="masthead-demo-inner">
-            <ArrayScanDemo />
-          </div>
+          <BubbleSortDemo />
         </div>
 
         <div className="masthead-bar">

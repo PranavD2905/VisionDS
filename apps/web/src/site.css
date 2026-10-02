@@ -403,6 +403,19 @@
   52%, 70% { border-color: var(--accent); background: var(--accent-wash); }
   71%, 100% { border-color: var(--border); background: var(--cell-bg); }
 }
+/* 3D exhibits: the real workbench scenes, scripted. They fill the stage's
+   width (the canvas is sized from a measured box) instead of hugging content. */
+.d-scene {
+  justify-self: stretch;
+  align-self: center;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.d-scene-canvas { position: relative; width: 100%; }
+.masthead-demo .d-scene { max-width: 640px; }
+
 .d-readout { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .d-chip {
   display: inline-flex;
