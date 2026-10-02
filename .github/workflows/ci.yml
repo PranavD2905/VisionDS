@@ -23,8 +23,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       # Everything but the trace service, which needs clang/lldb/JDK and runs
-      # in its own image below.
-      - run: pnpm -r --workspace-concurrency=1 --filter '!@visionds/trace-service' test
+      # in its own image below. The root is excluded too: its own `test`
+      # script is an unfiltered `pnpm -r test` that would bring it back.
+      - run: pnpm -r --workspace-concurrency=1 --filter '!@visionds/trace-service' --filter '!visionds' test
       - run: pnpm build
       - run: pnpm --filter @visionds/extension build
 

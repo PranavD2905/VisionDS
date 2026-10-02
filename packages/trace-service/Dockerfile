@@ -23,7 +23,10 @@ RUN apt-get update \
  && ln -sf /usr/bin/lldb-${LLVM_VERSION} /usr/local/bin/lldb \
  && rm -rf /var/lib/apt/lists/*
 
-ENV VISIONDS_LLDB_PYTHONPATH=/usr/lib/llvm-${LLVM_VERSION}/lib/python3/dist-packages \
+# The real lldb package (with __init__.py) is under the versioned site-packages;
+# python3/dist-packages only holds .so shims and imports as an empty namespace.
+# python3.11 = bookworm's python3 — change it with the base image.
+ENV VISIONDS_LLDB_PYTHONPATH=/usr/lib/llvm-${LLVM_VERSION}/lib/python3.11/site-packages \
     VISIONDS_PYTHON=/usr/bin/python3 \
     VISIONDS_JAVA_HOME=/usr/lib/jvm/java-${JDK_VERSION}-openjdk-amd64 \
     VISIONDS_CACHE_DIR=/var/cache/visionds \
