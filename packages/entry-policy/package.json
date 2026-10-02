@@ -1,0 +1,22 @@
+{
+  "name": "@visionds/entry-policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lezer/common": "^1.5.2",
+    "@lezer/cpp": "^1.1.6",
+    "@lezer/java": "^1.1.3",
+    "@lezer/python": "^1.1.19"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

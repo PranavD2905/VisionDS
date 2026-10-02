@@ -54,6 +54,17 @@ pnpm workspaces monorepo:
   observed calling themselves — mutual recursion included; every step now
   carries an optional `func` name for it;
   `fixtures/twoSumFail.ts` canned trace for UI work without a runner.
+- `packages/entry-policy` — **the one entry-point rule set** (see CONTEXT.md
+  and `docs/adr/0001`). Lezer syntax trees for Python/C++/Java, pure JS, so the
+  same code runs in the browser, the Pyodide worker and the trace service.
+  `policyFor(lang)` → `analyze` (candidates = top-level functions + public
+  `Solution` methods; nested, private, `_`-prefixed, inner-class and
+  constructor functions are helpers; **roots** = candidates no other function
+  calls; **default entry** = last root `Solution` method, else last root),
+  `defaultCallSite`, and `resolveCallSite` — the entry is whatever the call
+  site calls, exactly once, with overloads split by the testcase's argument
+  count. Every failure is a `SubmissionError` (a user error, never a 500). One
+  table-driven test runs every scenario in all three languages.
 - `packages/runners` — `Runner` interface + two implementations.
   `PyodideRunner`: a Web Worker boots Pyodide (assets served locally from
   `/pyodide/` via vite-plugin-static-copy, not CDN) and runs student code
