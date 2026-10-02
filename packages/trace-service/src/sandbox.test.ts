@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { sandboxEnabled } from './sandbox';
 import { traceCase } from './trace';
@@ -56,6 +57,16 @@ class Solution { public:
     const bomb = await traceCase('cpp', code, tc('0')).catch((e: Error) => e);
     // Killed by rlimits/watchdog: any outcome but a pass, and no hang.
     if (!(bomb instanceof Error)) expect(bomb.result.verdict).not.toBe('pass');
+    // Nothing of it survives the run: a leaked bomb would hold the uid's
+    // process limit and break every later run on the machine.
+    const left = (() => {
+      try {
+        return execFileSync('pgrep', ['-u', process.env.VISIONDS_SANDBOX_USER!], { encoding: 'utf8' }).trim();
+      } catch {
+        return ''; // pgrep exits 1 when nothing matches
+      }
+    })();
+    expect(left).toBe('');
 
     const ok = await traceCase('cpp', 'class Solution { public: int probe(int x) { return x + 1; } };', tc('1'));
     expect(ok.result.verdict).toBe('pass');

@@ -2,12 +2,14 @@
 #
 # Build from the REPO ROOT (the service imports workspace packages):
 #   docker build -f packages/trace-service/Dockerfile -t visionds-trace .
-# Run locally (iptables needs NET_ADMIN, lldb needs ptrace):
+# Run locally (iptables needs NET_ADMIN, lldb needs ptrace, the per-run PID
+# namespace needs SYS_ADMIN + mount, which AppArmor's docker profile denies):
 #   docker run --rm -p 8787:8080 --cap-add NET_ADMIN --cap-add SYS_PTRACE \
-#     --security-opt seccomp=unconfined visionds-trace
+#     --cap-add SYS_ADMIN --security-opt seccomp=unconfined \
+#     --security-opt apparmor=unconfined visionds-trace
 #
 # On Fly.io the machine is a Firecracker VM, so root inside it already has
-# both capabilities; no flags needed.
+# all of these; no flags needed.
 
 FROM node:22-bookworm-slim
 

@@ -8,9 +8,10 @@ import { chownSync } from 'node:fs';
  * container image sets it; local macOS dev leaves it unset and runs as before.
  * When on, every child is launched as
  *
- *   prlimit <cpu/nproc/fsize/nofile[/as]> -- setpriv --reuid=U --regid=U --clear-groups -- <cmd>
+ *   unshare --pid … -- prlimit <cpu/nproc/fsize/nofile[/as]> -- setpriv --reuid=U … -- <cmd>
  *
- * so it runs as that user under hard rlimits. Network is denied to the same
+ * so it runs as that user under hard rlimits, in a PID namespace that dies
+ * with the run. Network is denied to the same
  * uid by an iptables owner-match rule the entrypoint installs (see
  * docker-entrypoint.sh); loopback stays open because JDI attaches to its
  * target JVM over a localhost socket.
@@ -40,9 +41,31 @@ export function sandboxed(command: string, args: string[], limits: Limits = {}):
     `--nofile=${num('VISIONDS_SANDBOX_NOFILE', 256)}`,
   ];
   if (limits.memMb) rl.push(`--as=${limits.memMb * 1024 * 1024}`);
+  // A fresh PID namespace per run: when the run ends — or the watchdog kills
+  // it — the kernel kills everything inside, however it was forked. Process
+  // groups alone leaked a fork bomb's children (lldb starts the debuggee in
+  // its own group), and the survivors held the uid's NPROC so every later
+  // run failed with "pthread_create: Resource temporarily unavailable".
+  // --mount-proc keeps /proc consistent with the namespace for lldb.
   return [
-    'prlimit',
-    [...rl, '--', 'setpriv', `--reuid=${USER}`, `--regid=${USER}`, '--clear-groups', '--', command, ...args],
+    'unshare',
+    [
+      '--pid',
+      '--fork',
+      '--kill-child',
+      '--mount-proc',
+      '--',
+      'prlimit',
+      ...rl,
+      '--',
+      'setpriv',
+      `--reuid=${USER}`,
+      `--regid=${USER}`,
+      '--clear-groups',
+      '--',
+      command,
+      ...args,
+    ],
   ];
 }
 

@@ -47,6 +47,6 @@ jobs:
       # rule, so sandbox.test.ts actually exercises it here.
       - name: Test inside the image
         run: >
-          docker run --rm --cap-add NET_ADMIN --cap-add SYS_PTRACE
-          --security-opt seccomp=unconfined
-          visionds-trace:ci node_modules/.bin/vitest run
+          docker run --rm --cap-add NET_ADMIN --cap-add SYS_PTRACE --cap-add SYS_ADMIN
+          --security-opt seccomp=unconfined --security-opt apparmor=unconfined
+          visionds-trace:ci node_modules/.bin/vitest run --no-file-parallelism

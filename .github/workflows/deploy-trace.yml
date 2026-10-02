@@ -30,9 +30,9 @@ jobs:
           cache-from: type=gha
       - name: Test inside the image before shipping it
         run: >
-          docker run --rm --cap-add NET_ADMIN --cap-add SYS_PTRACE
-          --security-opt seccomp=unconfined
-          visionds-trace:deploy node_modules/.bin/vitest run
+          docker run --rm --cap-add NET_ADMIN --cap-add SYS_PTRACE --cap-add SYS_ADMIN
+          --security-opt seccomp=unconfined --security-opt apparmor=unconfined
+          visionds-trace:deploy node_modules/.bin/vitest run --no-file-parallelism
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy
         run: >
