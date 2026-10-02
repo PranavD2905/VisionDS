@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { getDefaultSystemCode, traceCase } from './trace';
+import { buildCallTree } from '@visionds/trace-schema';
+import { traceCase } from './trace';
 
 // A buggy two-sum: returns just one index instead of the pair — a wrong answer,
 // not a crash, so the verdict is `fail` with a divergence step to jump to.
@@ -169,45 +170,10 @@ public:
     expect(trace.steps).toHaveLength(0);
   }, 30_000);
 
-  it('self-corrects a stale cross-language entry override (className: null) instead of trusting it', () => {
-    // Regression: a client-side race between switching languages and a
-    // debounced rescan could leak a *different* language's already-resolved
-    // entry (e.g. Python's `{name, className: null}`) into a C++ default
-    // system-code request. Trusting it blindly generated `twoSum(a0, a1)`
-    // instead of `Solution().twoSum(a0, a1)` — an undeclared-identifier
-    // compile error, not a clean fail verdict.
-    const code = `class Solution {
-public:
-    vector<int> twoSum(vector<int>& nums, int target) {
-        unordered_map<int,int> seen;
-        for (int i = 0; i < (int)nums.size(); i++) {
-            int need = target - nums[i];
-            if (seen.count(need)) return {seen[need], i};
-            seen[nums[i]] = i;
-        }
-        return {};
-    }
-};`;
-    const seed = getDefaultSystemCode('cpp', code, { name: 'twoSum', className: null });
-    expect(seed.entry.className).toBe('Solution');
-    expect(seed.systemCode).toContain('Solution().twoSum');
-
-    const trace = traceCase(
-      'cpp',
-      code,
-      { input: '[2,7,11,15]\n9', expected: '[0,1]' },
-      seed.systemCode,
-      seed.entry,
-    );
-    expect(trace.result.verdict).toBe('pass');
-  }, 30_000);
-
-  it('reports the corrected entry when it seeds the system code itself', () => {
-    // Regression: given an entry but no system code, traceCase regenerates the
-    // system code from the *corrected* entry, but used to echo back the raw
-    // caller entry — so `trace.entry` described a free function while
-    // `trace.systemCode` called `Solution().twoSum`. Anything reading both
-    // (signature extraction, the UI's staleness check) saw a contradiction.
+  it('steps an entry that takes plain int scalars', () => {
+    // Regression: the bare-name breakpoint on `add` also matched libc++
+    // symbols, stopped there first, and stepped out of main with nothing
+    // recorded — the run then hit the step cap with zero steps.
     const code = `class Solution {
 public:
     int add(int a, int b) {
@@ -215,19 +181,79 @@ public:
         return sum;
     }
 };`;
-    const trace = traceCase(
-      'cpp',
-      code,
-      { input: '2\n3', expected: '5' },
-      undefined,
-      { name: 'add', className: null },
-    );
+    const trace = traceCase('cpp', code, { input: '2\n3', expected: '5' });
+    expect(trace.result.verdict).toBe('pass');
     expect(trace.entry).toEqual({ name: 'add', className: 'Solution' });
-    expect(trace.systemCode).toContain('Solution().add');
-    // NB: the verdict is deliberately not asserted here. A C++ entry taking
-    // plain `int` scalars currently hits the step cap with zero recorded steps
-    // (the stepper never reaches the student frame) — a pre-existing gap,
-    // reproducible through the ordinary seed path too, and unrelated to the
-    // entry/systemCode consistency this test covers.
+    expect(trace.steps.length).toBeGreaterThan(1);
+  }, 30_000);
+
+  it('traces a private helper written after the entry, and names the final return after the entry', () => {
+    const code = `class Solution {
+public:
+    int maxDepth(TreeNode* root) {
+        return depth(root);
+    }
+private:
+    int depth(TreeNode* n) {
+        if (!n) return 0;
+        return 1 + max(depth(n->left), depth(n->right));
+    }
+};`;
+    const trace = traceCase('cpp', code, { input: '[3,9,20,null,null,15,7]', expected: '3' });
+    expect(trace.result.verdict).toBe('pass');
+    expect(trace.entry).toEqual({ name: 'maxDepth', className: 'Solution' });
+    expect(new Set(trace.steps.map((s) => s.func))).toEqual(new Set(['maxDepth', 'depth']));
+    expect(trace.steps.at(-1)).toMatchObject({ event: 'return', func: 'maxDepth', callDepth: 0 });
+    // one root: the entry, with the helper calls beneath it
+    const tree = buildCallTree(trace.steps);
+    expect(tree.roots).toHaveLength(1);
+    expect(tree.nodes[tree.roots[0]!]!.func).toBe('maxDepth');
+  }, 30_000);
+
+  it('runs whichever candidate an edited call site calls', () => {
+    const code = `int square(int x) { return x * x; }
+class Solution {
+public:
+    int twice(int x) { return 2 * x; }
+};`;
+    const trace = traceCase('cpp', code, { input: '4', expected: '16' }, 'auto result = square(a0);');
+    expect(trace.entry).toEqual({ name: 'square', className: null });
+    expect(trace.result.verdict).toBe('pass');
+    expect(trace.systemCode).toBe('auto result = square(a0);');
+  }, 30_000);
+
+  it('resolves overloads by the testcase argument count', () => {
+    const code = `class Solution {
+public:
+    int solve(int a) { return a; }
+    int solve(int a, int b) { return a + b; }
+};`;
+    const callSite = 'auto result = Solution().solve(a0, a1);';
+    const two = traceCase('cpp', code, { input: '2\n3', expected: '5' }, callSite);
+    expect(two.result.verdict).toBe('pass');
+    expect(two.steps.length).toBeGreaterThan(0);
+  }, 30_000);
+
+  it('reports call-site and testcase problems as error verdicts that echo the call site', () => {
+    const code = 'class Solution { public: int f(int x) { return x; } };';
+    const none = traceCase('cpp', code, { input: '1', expected: '1' }, 'auto result = g(a0);');
+    expect(none.result.verdict).toBe('error');
+    expect(none.result.message).toMatch(/doesn't call any function from your code/);
+    expect(none.systemCode).toBe('auto result = g(a0);');
+
+    const arity = traceCase('cpp', code, { input: '1\n2', expected: '1' });
+    expect(arity.result.message).toMatch(/f takes 1 argument, but the testcase gives 2/);
+
+    const bad = traceCase('cpp', code, { input: '[1,', expected: '1' });
+    expect(bad.result.message).toMatch(/Could not parse the testcase value/);
+  });
+
+  it('accepts Python-literal testcases, like the Python runner', () => {
+    const code = `class Solution {
+public:
+    int count(vector<string>& words, bool flag) { return flag ? (int)words.size() : 0; }
+};`;
+    const trace = traceCase('cpp', code, { input: "['a','b']\nTrue", expected: '2' });
+    expect(trace.result.verdict).toBe('pass');
   }, 30_000);
 });

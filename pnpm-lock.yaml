@@ -53,6 +53,9 @@ importers:
       '@visionds/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@visionds/entry-policy':
+        specifier: workspace:*
+        version: link:../../packages/entry-policy
       '@visionds/explainer':
         specifier: workspace:*
         version: link:../../packages/explainer
@@ -139,6 +142,9 @@ importers:
       '@lezer/python':
         specifier: ^1.1.19
         version: 1.1.19
+      '@visionds/trace-schema':
+        specifier: workspace:*
+        version: link:../trace-schema
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -165,6 +171,9 @@ importers:
 
   packages/runners:
     dependencies:
+      '@visionds/entry-policy':
+        specifier: workspace:*
+        version: link:../entry-policy
       '@visionds/trace-schema':
         specifier: workspace:*
         version: link:../trace-schema
@@ -194,6 +203,9 @@ importers:
 
   packages/trace-service:
     dependencies:
+      '@visionds/entry-policy':
+        specifier: workspace:*
+        version: link:../entry-policy
       '@visionds/trace-schema':
         specifier: workspace:*
         version: link:../trace-schema

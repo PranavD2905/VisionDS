@@ -19,6 +19,7 @@
     "@supabase/supabase-js": "^2.48.0",
     "@uiw/react-codemirror": "^4.25.11",
     "@visionds/auth": "workspace:*",
+    "@visionds/entry-policy": "workspace:*",
     "@visionds/explainer": "workspace:*",
     "@visionds/runners": "workspace:*",
     "@visionds/trace-schema": "workspace:*",

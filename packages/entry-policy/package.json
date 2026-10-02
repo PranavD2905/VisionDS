@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./python": "./src/python.ts"
   },
   "scripts": {
     "test": "vitest run"
@@ -13,7 +14,8 @@
     "@lezer/common": "^1.5.2",
     "@lezer/cpp": "^1.1.6",
     "@lezer/java": "^1.1.3",
-    "@lezer/python": "^1.1.19"
+    "@lezer/python": "^1.1.19",
+    "@visionds/trace-schema": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

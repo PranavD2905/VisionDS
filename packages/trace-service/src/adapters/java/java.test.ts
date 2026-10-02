@@ -62,4 +62,41 @@ describe('Java tracing via JDI', () => {
     expect(trace.result.verdict).toBe('error');
     expect(trace.steps).toHaveLength(0);
   }, 30_000);
+
+  it('defaults past a public helper written after the entry, and traces it', () => {
+    const code = `class Solution {
+    public int sumOfSquares(int[] nums) {
+        int total = 0;
+        for (int x : nums) total += square(x);
+        return total;
+    }
+    public int square(int x) {
+        return x * x;
+    }
+}`;
+    const trace = traceCase('java', code, { input: '[1,2,3]', expected: '14' });
+    expect(trace.entry).toEqual({ name: 'sumOfSquares', className: 'Solution' });
+    expect(trace.result.verdict).toBe('pass');
+    expect(new Set(trace.steps.map((s) => s.func))).toEqual(new Set(['sumOfSquares', 'square']));
+  }, 30_000);
+
+  it('traces the overload the testcase argument count selects', () => {
+    const code = `class Solution {
+    public int solve(int a) {
+        return a;
+    }
+    public int solve(int a, int b) {
+        int s = a + b;
+        return s;
+    }
+}`;
+    const trace = traceCase(
+      'java',
+      code,
+      { input: '2\n3', expected: '5' },
+      'var result = new Solution().solve(a0, a1);',
+    );
+    expect(trace.result.verdict).toBe('pass');
+    expect(trace.steps.some((s) => s.locals.some((l) => l.name === 'b'))).toBe(true);
+  }, 30_000);
 });

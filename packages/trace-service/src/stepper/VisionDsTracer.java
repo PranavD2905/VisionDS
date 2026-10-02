@@ -11,7 +11,10 @@ import java.util.*;
  * object on stdout — the same step shape the other runners produce: one snapshot
  * per executed line, each with capped, kind-tagged local-variable values.
  *
- * Args: <targetClasspath> <mainClass> <entryClass> <entryMethod> <studentStart> <capsJson>
+ * Args: <targetClasspath> <mainClass> <entryClass> <entryMethod> <entryArity> <studentStart> <capsJson>
+ *
+ * The entry is matched by name *and* argument count, so an overload the call
+ * site did not resolve to is never the one traced.
  */
 public class VisionDsTracer {
     static int MAX_STEPS = 10_000, MAX_ITEMS = 100, MAX_STRLEN = 200, MAX_DEPTH = 3, WALL_MS = 5_000;
@@ -19,8 +22,9 @@ public class VisionDsTracer {
 
     public static void main(String[] args) throws Exception {
         String cp = args[0], mainClass = args[1], entryClass = args[2], entryMethod = args[3];
-        int studentStart = Integer.parseInt(args[4]);
-        if (args.length > 5) applyCaps(args[5]);
+        int entryArity = Integer.parseInt(args[4]);
+        int studentStart = Integer.parseInt(args[5]);
+        if (args.length > 6) applyCaps(args[6]);
 
         LaunchingConnector conn = Bootstrap.virtualMachineManager().defaultConnector();
         Map<String, Connector.Argument> a = conn.defaultArguments();
@@ -55,10 +59,11 @@ public class VisionDsTracer {
             try { es = q.remove(); } catch (VMDisconnectedException e) { break; }
             for (Event ev : es) {
                 if (ev instanceof MethodEntryEvent me && step == null) {
-                    if (me.method().name().equals(entryMethod)) {
+                    if (me.method().name().equals(entryMethod)
+                            && me.method().argumentTypeNames().size() == entryArity) {
                         ThreadReference t = me.thread();
                         baseFrames = t.frameCount();
-                        steps.add(snapshot(t, entryClass, studentStart, baseFrames));
+                        addStep(steps, snapshot(t, entryClass, studentStart, baseFrames));
                         step = erm.createStepRequest(t, StepRequest.STEP_LINE, StepRequest.STEP_INTO);
                         for (String ex : new String[]{"java.*", "javax.*", "sun.*", "jdk.*", "com.sun.*", "Main", "VisionDsTracer"})
                             step.addClassExclusionFilter(ex);
@@ -68,7 +73,7 @@ public class VisionDsTracer {
                     }
                 } else if (ev instanceof StepEvent se) {
                     if (isStudent(se.location().declaringType().name(), entryClass)) {
-                        steps.add(snapshot(se.thread(), entryClass, studentStart, baseFrames));
+                        addStep(steps, snapshot(se.thread(), entryClass, studentStart, baseFrames));
                         if (steps.size() >= MAX_STEPS) { limit = "steps"; break outer; }
                         if (System.currentTimeMillis() - start > WALL_MS) { limit = "time"; break outer; }
                     }
@@ -100,6 +105,11 @@ public class VisionDsTracer {
         out.append(",\"resultJson\":").append(resultJson == null ? "null" : jsonStr(resultJson));
         out.append(",\"exited\":true}");
         System.out.println(out);
+    }
+
+    /** A failed snapshot is dropped, never recorded as a made-up line-1 step. */
+    static void addStep(List<String> steps, String step) {
+        if (step != null) steps.add(step);
     }
 
     static boolean isStudent(String cls, String entryClass) {
@@ -137,7 +147,7 @@ public class VisionDsTracer {
             }
             sb.append("]");
         } catch (Exception e) {
-            sb.append("\"index\":0,\"line\":1,\"event\":\"line\",\"callDepth\":0,\"stdout\":\"\",\"locals\":[]");
+            return null;
         }
         return sb.append("}").toString();
     }

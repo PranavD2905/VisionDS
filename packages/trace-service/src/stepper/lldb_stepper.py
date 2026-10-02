@@ -273,13 +273,47 @@ def _func_name(frame):
     return name.split("(")[0].split("::")[-1].strip()
 
 
+def _break_on_entry(target, entry, entry_line, student_start, student_end):
+    """Break on the student's own `entry` and nothing else.
+
+    A bare-name breakpoint also matches every same-named symbol in the binary
+    and the libraries it loads — `merge`, `rotate`, `add` all exist in libc++
+    — and stopping in one of those first left the stepper climbing out of
+    library code until the step cap, with zero student steps recorded. By
+    name (so lldb still skips the prologue and arguments are readable), then
+    every location outside the student's lines is disabled; of the rest, only
+    the overload starting nearest `entry_line` stays on.
+    """
+    # Scoped to the program's own module: library locations resolve lazily
+    # after launch and would otherwise appear enabled.
+    bp = target.BreakpointCreateByName(entry, target.GetExecutable().GetFilename())
+    student = []
+    for loc in bp:
+        line = loc.GetAddress().GetLineEntry().GetLine()
+        if student_start <= line <= student_end:
+            student.append(loc)
+        else:
+            loc.SetEnabled(False)
+    if len(student) > 1:
+        def start_line(loc):
+            fn = loc.GetAddress().GetFunction()
+            return fn.GetStartAddress().GetLineEntry().GetLine() if fn.IsValid() else 0
+        keep = min(student, key=lambda loc: abs(start_line(loc) - entry_line))
+        for loc in student:
+            if loc is not keep:
+                loc.SetEnabled(False)
+
+
 def main():
     binary = sys.argv[1]
     student_start = int(sys.argv[2])
     student_end = int(sys.argv[3])
     entry = sys.argv[4]
-    if len(sys.argv) > 5:
-        CAPS.update(json.loads(sys.argv[5]))
+    # 1-based line of the entry's name in the generated file; picks the right
+    # overload when several student functions share the entry's name.
+    entry_line = int(sys.argv[5])
+    if len(sys.argv) > 6:
+        CAPS.update(json.loads(sys.argv[6]))
 
     def in_student(frame):
         le = frame.GetLineEntry()
@@ -294,7 +328,7 @@ def main():
     if not target:
         print(json.dumps({"error": "could not load target"}))
         return
-    target.BreakpointCreateByName(entry)
+    _break_on_entry(target, entry, entry_line, student_start, student_end)
 
     err = lldb.SBError()
     launch_info = lldb.SBLaunchInfo([])
@@ -365,8 +399,11 @@ def main():
             proc.Continue()
             break
         else:
-            # Haven't reached student code yet — advance toward it.
-            thread.StepOut()
+            # Before the entry the only stops are breakpoint hits, and every
+            # breakpoint location outside the student's lines is disabled —
+            # run on to the entry rather than stepping out of whatever this is
+            # (stepping out of main ends the program with nothing recorded).
+            proc.Continue()
 
     stdout = proc.GetSTDOUT(1 << 16) or ""
     result_json = None

@@ -1,12 +1,17 @@
+// The Python policy alone: the worker bundle needs no C++/Java grammar.
+import { pythonPolicy } from '@visionds/entry-policy/python';
+import type { Candidate } from '@visionds/entry-policy';
 import {
   ExecutionTraceSchema,
   MAX_COLLECTION_ITEMS,
   MAX_DEPTH,
   MAX_STEPS,
   MAX_STRING_LEN,
+  SubmissionError,
   WALL_CLOCK_MS,
-  type Entry,
+  parseTestCase,
   type ExecutionTrace,
+  type JsonValue,
   type TestCase,
 } from '@visionds/trace-schema';
 import type { RunInput } from '../types';
@@ -43,54 +48,31 @@ function withHarness<T>(py: PyodideLike, fn: (ns: Namespace) => T): T {
   }
 }
 
-/** Every plausible entry candidate in `code`, via the real AST-based detector. */
-export function listPythonEntryCandidates(py: PyodideLike, code: string): Entry[] {
-  return withHarness(py, (ns) => {
-    const listCandidates = ns.get('list_entry_candidates');
-    try {
-      return JSON.parse(listCandidates(code) as string) as Entry[];
-    } finally {
-      listCandidates.destroy();
-    }
-  });
-}
-
-/** The default, student-visible/editable call-site for `code`. */
-export function getDefaultPythonSystemCode(
-  py: PyodideLike,
-  code: string,
-  entryOverride?: Entry,
-): { systemCode: string; entry: Entry } {
-  const candidates = listPythonEntryCandidates(py, code);
-  if (candidates.length === 0) {
-    throw new Error('no entry point found: define a top-level function or a Solution class');
-  }
-  const entry =
-    (entryOverride && candidates.find((c) => c.name === entryOverride.name)) ??
-    candidates[candidates.length - 1]!;
-  return withHarness(py, (ns) => {
-    const defaultSystemCode = ns.get('default_system_code');
-    try {
-      // Pass '' rather than JS `null` — crossing the Pyodide FFI as a bare
-      // argument, `null` doesn't reliably become Python `None`.
-      const systemCode = defaultSystemCode(entry.name, entry.className ?? '') as string;
-      return { systemCode, entry };
-    } finally {
-      defaultSystemCode.destroy();
-    }
-  });
-}
-
 /**
  * Runs one testcase through harness.py inside an existing Pyodide instance
  * and returns the schema-validated trace. Shared by the browser worker and
  * the Node test suite so both exercise identical code.
+ *
+ * The testcase is parsed and the entry point resolved from the call site
+ * here, by the same shared rules every runner uses; the harness only traces.
  */
 export function runCaseInPyodide(
   py: PyodideLike,
   input: RunInput,
   testCase: TestCase,
 ): ExecutionTrace {
+  let args: JsonValue[] = [];
+  let expected: JsonValue = null;
+  let entry: Candidate | undefined;
+  let submissionError = '';
+  try {
+    ({ args, expected } = parseTestCase(testCase));
+    entry = pythonPolicy.resolveCallSite(input.studentCode, input.systemCode, args.length);
+  } catch (e) {
+    if (!(e instanceof SubmissionError)) throw e;
+    submissionError = e.message;
+  }
+
   return withHarness(py, (ns) => {
     const runCase = ns.get('run_case');
     try {
@@ -99,9 +81,14 @@ export function runCaseInPyodide(
         input.studentCode,
         testCase.input,
         testCase.expected,
+        JSON.stringify(args),
+        JSON.stringify(expected),
+        submissionError,
         CAPS_JSON,
       );
-      return ExecutionTraceSchema.parse(JSON.parse(json as string));
+      const trace = JSON.parse(json as string) as ExecutionTrace;
+      if (entry) trace.entry = { name: entry.name, className: entry.className };
+      return ExecutionTraceSchema.parse(trace);
     } finally {
       runCase.destroy();
     }

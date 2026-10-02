@@ -1,20 +1,21 @@
 import { spawnSync } from 'node:child_process';
+import { type Candidate, policyFor } from '@visionds/entry-policy';
 import {
   ExecutionTraceSchema,
   MAX_STEPS,
+  SubmissionError,
   WALL_CLOCK_MS,
-  listJavaEntryCandidates,
+  parseTestCase,
+  userErrorTrace,
   type Entry,
   type ExecutionTrace,
   type JsonValue,
   type TestCase,
-  type TraceStep, resolveEntryPick } from '@visionds/trace-schema';
+  type TraceStep,
+} from '@visionds/trace-schema';
 import { cppAdapter } from './adapters/cpp';
-import { generateDefaultSystemCode as generateDefaultCppSystemCode } from './adapters/cpp/harness';
 import { javaAdapter } from './adapters/java';
-import { generateDefaultJavaSystemCode } from './adapters/java/harness';
-import { type LanguageAdapter, type PreparedProgram, TraceUserError } from './adapters/types';
-import { parseValue } from './parseInput';
+import type { LanguageAdapter, PreparedProgram } from './adapters/types';
 import { valuesEqual } from './verdict';
 
 const ADAPTERS: Record<string, LanguageAdapter> = {
@@ -36,105 +37,61 @@ export function supportedLanguages(): string[] {
 }
 
 /**
- * The default system code (imports/decls/call-site) for a language + student
- * code + testcase — what the UI seeds its collapsed, editable strip with, and
- * what a dropdown pick of a non-default candidate regenerates against.
- */
-export function getDefaultSystemCode(
-  language: string,
-  code: string,
-  entryOverride?: Entry,
-): { systemCode: string; entry: Entry } {
-  const lang = language.toLowerCase();
-  // Everything below is analysis of a *submission*, and the detectors signal an
-  // ordinary mistake ("no `class Solution` found", "no public method") with a
-  // plain Error. Normalizing here is what makes those reach callers as user
-  // errors rather than service faults — without it the HTTP layer's 4xx branch
-  // is nearly dead code, since detection failure is the common case.
-  try {
-    if (lang === 'cpp' || lang === 'c++') {
-      // CppEntry is exactly {name, className} — the wire-level Entry shape
-      // already matches, no lookup needed.
-      return generateDefaultCppSystemCode(code, entryOverride ?? undefined);
-    }
-    if (lang === 'java') {
-      // JavaEntry carries returnType/params too (needed to build typed decls);
-      // resolve the wire-level {name, className} pick against the current
-      // code's candidate list to recover the full signature. The adapter
-      // resolves the same way at run time, so a seed and its run agree.
-      const resolved = resolveEntryPick(listJavaEntryCandidates(code), entryOverride);
-      const seed = generateDefaultJavaSystemCode(code, resolved);
-      return {
-        systemCode: seed.systemCode,
-        entry: { name: seed.entry.name, className: 'Solution' },
-      };
-    }
-  } catch (e) {
-    if (e instanceof TraceUserError) throw e;
-    throw new TraceUserError(e instanceof Error ? e.message : String(e));
-  }
-  throw new TraceUserError(`unsupported language: ${language}`);
-}
-
-/**
  * Trace one testcase for a server-side language and return a schema-validated
  * ExecutionTrace — the exact contract the Pyodide runner produces, so the UI
  * treats every language identically.
+ *
+ * `systemCode` is the call site. It alone decides which function runs: the
+ * entry point is resolved from it by the shared policy (docs/adr/0001), and
+ * an absent or blank call site means the default one. Every problem with the
+ * submission — no entry point, a call site calling zero or several of the
+ * student's functions, an unparseable testcase, an argument-count mismatch, a
+ * compile error — comes back as an `error` verdict, never a throw.
  */
 export function traceCase(
   language: string,
   code: string,
   testCase: TestCase,
   systemCode?: string,
-  entry?: Entry,
 ): ExecutionTrace {
   const adapter = ADAPTERS[language.toLowerCase()];
-  if (!adapter) {
-    return errorTrace(language, code, testCase, `unsupported language: ${language}`);
+  const policy = policyFor(language);
+  if (!adapter || !policy) {
+    return userErrorTrace({ language, code, testCase, message: `unsupported language: ${language}` });
   }
 
-  // An empty string or a nameless entry means "not really provided" (e.g. the
-  // client hasn't finished generating its default yet) — never let that
-  // silently produce a system-code region with no call in it, which would
-  // compile to a translation unit with no `main()` and fail at *link* time
-  // with a confusing "undefined symbol: _main" instead of a clean error.
-  const haveSystemCode = systemCode !== undefined && systemCode.trim() !== '';
-  const haveEntry = entry !== undefined && entry.name !== '';
-
-  let resolvedSystemCode: string;
-  let resolvedEntry: Entry;
+  let callSite = systemCode ?? '';
+  let entry: Candidate;
+  let args: JsonValue[];
+  let expected: JsonValue;
   try {
-    if (haveSystemCode && haveEntry) {
-      resolvedSystemCode = systemCode!;
-      resolvedEntry = entry!;
-    } else {
-      // The seed is generated *from* the caller's entry when there is one, so
-      // `seed.entry` is that same choice after the detector has corrected it
-      // (Java, for instance, fills in the `Solution` class the caller left
-      // null). Preferring the raw caller entry here would leave `trace.entry`
-      // describing a different function than `resolvedSystemCode` actually
-      // calls, and the adapters read both — C++ signature extraction would
-      // hunt for a free function while the system code calls `Solution::…`.
-      const seed = getDefaultSystemCode(language, code, haveEntry ? entry : undefined);
-      resolvedSystemCode = haveSystemCode ? systemCode! : seed.systemCode;
-      resolvedEntry = seed.entry;
-    }
+    if (!callSite.trim()) callSite = policy.defaultCallSite(code);
+    ({ args, expected } = parseTestCase(testCase));
+    entry = policy.resolveCallSite(code, callSite, args.length);
   } catch (e) {
-    if (e instanceof TraceUserError) return errorTrace(language, code, testCase, e.message);
-    throw e;
+    if (!(e instanceof SubmissionError)) throw e;
+    return userErrorTrace({ language, code, testCase, message: e.message, systemCode: callSite });
   }
 
-  let prepared;
+  const traced: Entry = { name: entry.name, className: entry.className };
+  let prepared: PreparedProgram;
   try {
-    prepared = adapter.prepare(code, resolvedSystemCode, resolvedEntry, testCase);
+    prepared = adapter.prepare(code, callSite, entry, args);
   } catch (e) {
-    if (e instanceof TraceUserError) return errorTrace(language, code, testCase, e.message);
-    throw e;
+    if (!(e instanceof SubmissionError)) throw e;
+    return userErrorTrace({
+      language,
+      code,
+      testCase,
+      message: e.message,
+      systemCode: callSite,
+      entry: traced,
+    });
   }
 
   try {
     const out = runStepper(prepared);
-    return assembleTrace(language, code, testCase, out, resolvedSystemCode, resolvedEntry);
+    return assembleTrace(language, code, testCase, out, callSite, traced, expected);
   } finally {
     prepared.cleanup();
   }
@@ -167,6 +124,7 @@ function assembleTrace(
   out: StepperOutput,
   systemCode: string,
   entry: Entry,
+  expected: JsonValue,
 ): ExecutionTrace {
   const steps: TraceStep[] = [...out.steps];
 
@@ -176,7 +134,10 @@ function assembleTrace(
     : undefined;
 
   // Synthesize a `return` step so the UI shows the "returns X" moment and has a
-  // step to jump to — the stepper only emits per-line events.
+  // step to jump to — the stepper only emits per-line events. It is the
+  // *entry* returning at depth 0, even when the last recorded line was inside
+  // a helper; naming it after that helper made the call tree close the entry
+  // and open a bogus second root.
   if (hasResult && out.exited && steps.length > 0) {
     const last = steps[steps.length - 1]!;
     steps.push({
@@ -184,7 +145,7 @@ function assembleTrace(
       line: last.line,
       event: 'return',
       locals: last.locals,
-      func: last.func,
+      func: entry.name,
       stdout: last.stdout,
       callDepth: 0,
       returnValue: actual ?? null,
@@ -198,7 +159,7 @@ function assembleTrace(
     entry,
     testCase,
     steps,
-    result: buildResult(testCase, steps, out, actual, hasResult),
+    result: buildResult(testCase, steps, out, actual, hasResult, expected),
   };
   if (out.limit) trace.truncated = true;
   return ExecutionTraceSchema.parse(trace);
@@ -210,6 +171,7 @@ function buildResult(
   out: StepperOutput,
   actual: JsonValue | undefined,
   hasResult: boolean,
+  expected: JsonValue,
 ) {
   const lastIndex = steps.length > 0 ? steps.length - 1 : undefined;
 
@@ -234,7 +196,6 @@ function buildResult(
     };
   }
 
-  const expected = parseValue(testCase.expected);
   if (valuesEqual(actual as JsonValue, expected)) {
     return { ...testCase, verdict: 'pass' as const, actual };
   }
@@ -244,19 +205,4 @@ function buildResult(
     actual,
     ...(lastIndex !== undefined ? { divergenceStepIndex: lastIndex } : {}),
   };
-}
-
-function errorTrace(
-  language: string,
-  code: string,
-  testCase: TestCase,
-  message: string,
-): ExecutionTrace {
-  return ExecutionTraceSchema.parse({
-    language,
-    code,
-    testCase,
-    steps: [],
-    result: { ...testCase, verdict: 'error', message },
-  });
 }

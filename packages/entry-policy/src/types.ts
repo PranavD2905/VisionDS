@@ -44,14 +44,8 @@ export interface Analysis {
   defaultEntry: Candidate;
 }
 
-/**
- * A problem with the submission itself — no entry point, a call site that
- * calls zero or several candidates, an argument-count mismatch. Callers turn
- * it into an `error` verdict, never a service failure.
- */
-export class SubmissionError extends Error {
-  override name = 'SubmissionError';
-}
+/** Thrown for every policy failure; shared with the testcase parser. */
+export { SubmissionError } from '@visionds/trace-schema';
 
 /** The one entry-point rule set, implemented once per language. */
 export interface EntryPolicy {

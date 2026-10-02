@@ -1,4 +1,4 @@
-import type { Entry, ExecutionTrace, TestCase } from '@visionds/trace-schema';
+import type { ExecutionTrace, TestCase } from '@visionds/trace-schema';
 
 export interface RunnerCapabilities {
   language: string;
@@ -12,15 +12,14 @@ export interface RunOptions {
 }
 
 /**
- * What actually gets executed: the student's own code, plus the generated
- * (and possibly student-edited) wiring — imports/call-site — that invokes it
- * against a testcase. `entry` names which function/method `systemCode`'s call
- * targets; absent when the runner should detect a default itself.
+ * What actually gets executed: the student's own code, plus the call site
+ * (`systemCode`) that invokes it against a testcase. The call site is the
+ * single source of truth for which function runs — every runner derives the
+ * entry point from it (docs/adr/0001), so there is no separate `entry`.
  */
 export interface RunInput {
   studentCode: string;
   systemCode: string;
-  entry?: Entry;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { pythonPolicy } from '@visionds/entry-policy';
 import {
   MAX_COLLECTION_ITEMS,
   MAX_STEPS,
@@ -7,7 +8,7 @@ import {
 } from '@visionds/trace-schema';
 import { loadPyodide } from 'pyodide';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { getDefaultPythonSystemCode, runCaseInPyodide, type PyodideLike } from './invoke';
+import { runCaseInPyodide, type PyodideLike } from './invoke';
 
 let py: PyodideLike;
 
@@ -15,13 +16,9 @@ beforeAll(async () => {
   py = (await loadPyodide()) as unknown as PyodideLike;
 }, 120_000);
 
-/** Run with the default (last-candidate) system code, matching pre-refactor behavior. */
-function runCase(
-  studentCode: string,
-  testCase: TestCase,
-  entryOverride?: Entry,
-) {
-  const { systemCode } = getDefaultPythonSystemCode(py, studentCode, entryOverride);
+/** Run through the default call site (or the one for `entry`). */
+function runCase(studentCode: string, testCase: TestCase, entry?: Entry) {
+  const systemCode = pythonPolicy.defaultCallSite(studentCode, entry);
   return runCaseInPyodide(py, { studentCode, systemCode }, testCase);
 }
 
@@ -143,7 +140,7 @@ describe('harness.py via pyodide', () => {
       expected: '[1,2]',
     });
     expect(trace.result.verdict).toBe('error');
-    expect(trace.result.message).toContain('could not parse');
+    expect(trace.result.message).toContain('Could not parse the testcase value');
     expect(trace.steps).toHaveLength(0);
   });
 
@@ -257,36 +254,39 @@ def build(vals):
     expect(value.right?.val).toBe(3);
   });
 
-  it('lists every candidate, not just the default', () => {
-    const code = `def helper(x):
-    return x + 1
-
-def twoSum(nums, target):
-    return [0, 1]
-`;
-    const { entry } = getDefaultPythonSystemCode(py, code);
-    expect(entry).toEqual({ name: 'twoSum', className: null });
-  });
-
-  it('targets a non-default candidate when the call line is edited', () => {
+  it('runs the candidate the call site calls, and echoes it as the entry', () => {
     const code = `def helper(nums, target):
     return [1, 1]
 
 def twoSum(nums, target):
     return [1, 2]
 `;
-    // helper is textually last-ish? no — twoSum is last, so the default
-    // targets twoSum; explicitly ask for helper instead.
-    const { systemCode, entry } = getDefaultPythonSystemCode(py, code, {
-      name: 'helper',
-      className: null,
-    });
-    expect(entry.name).toBe('helper');
-    const trace = runCaseInPyodide(py, { studentCode: code, systemCode }, CASE);
+    const trace = runCase(code, CASE, { name: 'helper', className: null });
     expect(trace.result.actual).toEqual([1, 1]);
+    expect(trace.entry).toEqual({ name: 'helper', className: null });
   });
 
-  it('reports a broken call-site distinctly from a broken solution', () => {
+  it('traces a helper method written after the entry, from inside the entry', () => {
+    const code = `class Solution:
+    def twoSum(self, nums, target):
+        return self.find(nums, target)
+
+    def find(self, nums, target):
+        seen = {}
+        for i, n in enumerate(nums):
+            if target - n in seen:
+                return [seen[target - n], i]
+            seen[n] = i
+`;
+    const trace = runCase(code, CASE);
+    expect(trace.entry).toEqual({ name: 'twoSum', className: 'Solution' });
+    expect(trace.result.verdict).toBe('pass');
+    const funcs = new Set(trace.steps.map((s) => s.func));
+    expect(funcs).toEqual(new Set(['twoSum', 'find']));
+    expect(trace.steps.find((s) => s.func === 'find')!.callDepth).toBe(1);
+  });
+
+  it('reports a call site that calls no candidate as a user error, before running', () => {
     const code = `def twoSum(nums, target):
     return [0, 1]
 `;
@@ -296,8 +296,44 @@ def twoSum(nums, target):
       CASE,
     );
     expect(trace.result.verdict).toBe('error');
-    expect(trace.result.message).toContain('error in generated call');
+    expect(trace.result.message).toMatch(/doesn't call any function from your code.*twoSum/);
     expect(trace.steps).toHaveLength(0);
+  });
+
+  it('reports an argument-count mismatch as a user error', () => {
+    const trace = runCase(TWO_SUM_OK, { input: '[3,2,4]\n6\n1', expected: '[1,2]' });
+    expect(trace.result.verdict).toBe('error');
+    expect(trace.result.message).toMatch(/twoSum takes 2 arguments, but the testcase gives 3/);
+  });
+
+  it('reports an unparseable testcase as a user error', () => {
+    const trace = runCase(TWO_SUM_OK, { input: '[3,2,4\n6', expected: '[1,2]' });
+    expect(trace.result.verdict).toBe('error');
+    expect(trace.result.message).toMatch(/Could not parse the testcase value/);
+  });
+
+  it('still reports a SyntaxError ahead of any call-site problem', () => {
+    const trace = runCase('def twoSum(nums, target)\n    return 1\n', CASE);
+    expect(trace.result.verdict).toBe('error');
+    expect(trace.result.message).toMatch(/SyntaxError/);
+  });
+
+  it('accepts Python literals in testcases', () => {
+    const code = `def f(words, flag):
+    return [len(words), flag]
+`;
+    const trace = runCase(code, { input: "['a','b']\nTrue", expected: '[2, true]' });
+    expect(trace.result.verdict).toBe('pass');
+  });
+
+  it('requires the call site to assign result', () => {
+    const trace = runCaseInPyodide(
+      py,
+      { studentCode: TWO_SUM_OK, systemCode: 'twoSum(*__vds_args__)' },
+      CASE,
+    );
+    expect(trace.result.verdict).toBe('error');
+    expect(trace.result.message).toMatch(/assign the answer to `result`/);
   });
 
   it('does not leak system-code frames into the student trace', () => {

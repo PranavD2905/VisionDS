@@ -1,11 +1,13 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listJavaEntryCandidates, type Entry, type TestCase, resolveEntryPick } from '@visionds/trace-schema';
+import type { Candidate } from '@visionds/entry-policy';
+import { SubmissionError, type JsonValue } from '@visionds/trace-schema';
 import { CAPS_JSON } from '../../caps';
-import { type LanguageAdapter, type PreparedProgram, TraceUserError } from '../types';
+import type { LanguageAdapter, PreparedProgram } from '../types';
 import { assembleJavaProgram } from './harness';
 
 const TRACER_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'stepper', 'VisionDsTracer.java');
@@ -34,11 +36,14 @@ function resolveJavaHome(): string {
 
 const bin = (tool: string) => join(resolveJavaHome(), 'bin', tool);
 
-// The JDI tracer is fixed; compile it once per process into a cache dir.
+// The JDI tracer is fixed per build; compile it once into a cache dir keyed by
+// its source, so an edited tracer is never run from a stale cached class.
 let tracerClasses: string | null = null;
 function ensureTracerCompiled(): string {
   if (tracerClasses && existsSync(join(tracerClasses, 'VisionDsTracer.class'))) return tracerClasses;
-  const dir = join(tmpdir(), 'visionds-java-tracer');
+  const hash = createHash('sha256').update(readFileSync(TRACER_SRC)).digest('hex').slice(0, 12);
+  const dir = join(tmpdir(), `visionds-java-tracer-${hash}`);
+  if (existsSync(join(dir, 'VisionDsTracer.class'))) return (tracerClasses = dir);
   mkdirSync(dir, { recursive: true });
   const res = spawnSync(bin('javac'), ['-d', dir, TRACER_SRC], { encoding: 'utf8', timeout: 60_000 });
   if (res.status !== 0) throw new Error(`failed to compile JDI tracer: ${res.stderr ?? ''}`);
@@ -47,20 +52,13 @@ function ensureTracerCompiled(): string {
 
 /**
  * Java adapter: writes Solution.java + Main.java, compiles them with debug info,
- * and steps Main under the JDI tracer. Compile errors become TraceUserError so
+ * and steps Main under the JDI tracer. Compile errors become SubmissionError so
  * they surface as an `error` verdict.
  */
 export const javaAdapter: LanguageAdapter = {
   language: 'java',
-  prepare(studentCode: string, systemCode: string, entry: Entry, testCase: TestCase): PreparedProgram {
-    // The wire-level Entry only carries {name, className}; recover the full
-    // signature (needed to type argument decls) from the current code.
-    const resolved = resolveEntryPick(listJavaEntryCandidates(studentCode), entry) ?? {
-      name: entry.name,
-      returnType: 'void',
-      params: [],
-    };
-    const prog = assembleJavaProgram(studentCode, systemCode, resolved, testCase);
+  prepare(studentCode: string, callSite: string, entry: Candidate, args: JsonValue[]): PreparedProgram {
+    const prog = assembleJavaProgram(studentCode, callSite, entry, args);
     const tracer = ensureTracerCompiled();
 
     const dir = mkdtempSync(join(tmpdir(), 'visionds-java-'));
@@ -75,7 +73,7 @@ export const javaAdapter: LanguageAdapter = {
     });
     if (compile.status !== 0) {
       rmSync(dir, { recursive: true, force: true });
-      throw new TraceUserError(cleanJavacError(compile.stderr ?? 'compilation failed', dir));
+      throw new SubmissionError(cleanJavacError(compile.stderr ?? 'compilation failed', dir));
     }
 
     return {
@@ -88,7 +86,8 @@ export const javaAdapter: LanguageAdapter = {
           dir, // target classpath
           'Main',
           'Solution',
-          prog.entry,
+          entry.name,
+          String(entry.params.length),
           String(prog.studentStart),
           CAPS_JSON,
         ],

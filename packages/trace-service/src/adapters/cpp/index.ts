@@ -3,9 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Entry, TestCase } from '@visionds/trace-schema';
+import type { Candidate } from '@visionds/entry-policy';
+import { SubmissionError, type JsonValue } from '@visionds/trace-schema';
 import { CAPS_JSON } from '../../caps';
-import { type LanguageAdapter, type PreparedProgram, TraceUserError } from '../types';
+import type { LanguageAdapter, PreparedProgram } from '../types';
 import { assembleCppProgram } from './harness';
 
 const COMPILER = process.env.VISIONDS_CXX ?? 'clang++';
@@ -21,13 +22,17 @@ function getLldbPythonPath(): string {
 /**
  * C++ adapter: generates one translation unit (prelude + student code + a
  * testcase `main`), compiles it with debug info, and hands the binary to the
- * lldb stepper. Compilation problems become TraceUserError so they surface as a
+ * lldb stepper. Compilation problems become SubmissionError so they surface as a
  * clean `error` verdict instead of an exception.
+ *
+ * The stepper breaks on the resolved entry only — by name within the
+ * student's lines, nearest the entry's own line — never on a same-named
+ * library symbol.
  */
 export const cppAdapter: LanguageAdapter = {
   language: 'cpp',
-  prepare(studentCode: string, systemCode: string, entry: Entry, testCase: TestCase): PreparedProgram {
-    const prog = assembleCppProgram(studentCode, systemCode, entry, testCase);
+  prepare(studentCode: string, callSite: string, entry: Candidate, args: JsonValue[]): PreparedProgram {
+    const prog = assembleCppProgram(studentCode, callSite, entry, args);
     const dir = mkdtempSync(join(tmpdir(), 'visionds-cpp-'));
     const srcPath = join(dir, 'main.cpp');
     const binPath = join(dir, 'prog');
@@ -41,7 +46,7 @@ export const cppAdapter: LanguageAdapter = {
 
     if (compile.status !== 0) {
       rmSync(dir, { recursive: true, force: true });
-      throw new TraceUserError(cleanCompilerError(compile.stderr ?? 'compilation failed', srcPath));
+      throw new SubmissionError(cleanCompilerError(compile.stderr ?? 'compilation failed', srcPath));
     }
 
     return {
@@ -52,7 +57,8 @@ export const cppAdapter: LanguageAdapter = {
           binPath,
           String(prog.studentStart),
           String(prog.studentEnd),
-          prog.entry,
+          entry.name,
+          String(prog.studentStart + entry.line - 1),
           CAPS_JSON,
         ],
         env: { PYTHONPATH: getLldbPythonPath() },

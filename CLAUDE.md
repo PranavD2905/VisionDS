@@ -53,7 +53,11 @@ pnpm workspaces monorepo:
   transitions where it only emits `line`) and reports which functions were
   observed calling themselves — mutual recursion included; every step now
   carries an optional `func` name for it;
-  `fixtures/twoSumFail.ts` canned trace for UI work without a runner.
+  `fixtures/twoSumFail.ts` canned trace for UI work without a runner;
+  `testcase.ts` — the **one testcase parser** (JSON first, then Python
+  literals: `True`/`None`, single quotes, tuples, trailing commas; one arg per
+  line, `name =` dropped), `SubmissionError` (the user-error type every
+  package shares) and `userErrorTrace`.
 - `packages/entry-policy` — **the one entry-point rule set** (see CONTEXT.md
   and `docs/adr/0001`). Lezer syntax trees for Python/C++/Java, pure JS, so the
   same code runs in the browser, the Pyodide worker and the trace service.
@@ -68,34 +72,48 @@ pnpm workspaces monorepo:
 - `packages/runners` — `Runner` interface + two implementations.
   `PyodideRunner`: a Web Worker boots Pyodide (assets served locally from
   `/pyodide/` via vite-plugin-static-copy, not CDN) and runs student code
-  under `harness.py`'s `sys.settrace` tracer: LeetCode-style input parsing
-  (one arg per line, `name = literal` accepted; entry point = last top-level
-  def, else last public method of `class Solution`), capped locals snapshots,
-  stdout capture, verdict + divergence detection. Node-shaped objects are
+  under `harness.py`'s `sys.settrace` tracer: capped locals snapshots,
+  stdout capture, verdict + divergence detection. The harness detects no
+  entry point and parses no input — `invoke.ts` parses the testcase
+  (trace-schema `parseTestCase`) and resolves the call site
+  (`@visionds/entry-policy/python`, the Python grammar only, to keep the
+  worker small) and hands the harness JSON args plus any user error, which it
+  reports after a SyntaxError. The call site must assign `result`. Node-shaped objects are
   **duck-typed, never name-matched** — `val`+`left`+`right` → `tree`,
   `val`+`next` → `linkedlist` — so a student's own class name works; the walks
   are identity-tracked (a cyclic list reports `cyclesTo`) and item-capped.
   A JS-side watchdog
   (cap + 10s) terminates the worker for loops Python can't interrupt →
   clean `timeout` verdict, never a frozen tab. `ServerRunner`: POSTs
-  `{language, code, testCase}` to the trace service and schema-validates the
-  reply — same contract, different transport. `AbortSignal` supported.
+  `{language, code, systemCode, testCase}` to `/trace` and schema-validates
+  the reply — same contract, different transport. No `entry` is ever sent:
+  the call site decides it. `AbortSignal` supported.
 - `packages/trace-service` — Node/TS server (run with `tsx`) that traces
   compiled languages under a debugger, emitting the identical
   `ExecutionTrace`. `POST /trace`. Pluggable `LanguageAdapter` seam: each
   adapter compiles a harness + returns a `StepperCommand` the generalized
-  runner spawns (`trace.ts`). Shared caps (`caps.ts`), entry-point rule, and
-  LeetCode input parsing. **C++** (`adapters/cpp`): one translation unit
-  (prelude + student code at known lines + a `main` building typed args and
-  JSON-serializing the result via a sentinel), compiled `clang++ -g`, stepped
+  runner spawns (`trace.ts`). `traceCase` = parse testcase → resolve the call
+  site via the entry policy → `adapter.prepare(code, callSite, entry, args)`
+  → step → assemble; every `SubmissionError` (no entry, bad call site, bad
+  testcase, arity mismatch, compile error) is a 200 with an `error` verdict
+  echoing `systemCode`/`entry`. There is no `/system-code` endpoint — call
+  sites are generated client-side. **C++** (`adapters/cpp`): one translation
+  unit (prelude + student code at known lines + a `main` that declares the
+  typed args `a0..an`, runs the call site, and prints `result` via a
+  sentinel — no marker comment to break), compiled `clang++ -g`, stepped
   by `stepper/lldb_stepper.py` (the `sys.settrace` analog) which reads locals
   as structured kind-tagged values (`vector`→array, `unordered_map`→dict,
   stack/queue via the underlying container, ListNode/TreeNode→linkedlist/tree),
-  hides pre-declaration garbage, climbs out of STL frames. **Java**
+  hides pre-declaration garbage, climbs out of STL frames. It breaks on the
+  entry by name *within the student's lines of the program's own module*,
+  nearest the entry's line (a bare-name breakpoint used to hit same-named
+  libc++ symbols and record nothing). **Java**
   (`adapters/java`): writes Solution.java (imports + student) + Main.java (arg
   building + result serialization + ListNode/TreeNode defs), compiles `javac
   -g`, stepped by `stepper/VisionDsTracer.java` — a JDI debugger program (the
-  Java analog) that class-exclusion-filters to the student's code and reads
+  Java analog; matches the entry by name + arity so overloads are exact, and
+  its compiled class is cached per source hash) that class-exclusion-filters
+  to the student's code and reads
   primitives/String/arrays/List/HashMap/HashSet/ListNode/TreeNode. Needs a JDK
   (auto-detected, or `VISIONDS_JAVA_HOME`). Runs student code → sandbox before
   any non-local deployment.

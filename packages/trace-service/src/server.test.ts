@@ -1,8 +1,6 @@
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTraceServer } from './server';
-import { getDefaultSystemCode } from './trace';
-import { TraceUserError } from './adapters/types';
 
 let base: string;
 const server = createTraceServer();
@@ -24,48 +22,67 @@ const post = async (path: string, body: string) => {
     headers: { 'Content-Type': 'application/json' },
     body,
   });
-  return { status: res.status, json: (await res.json()) as { error?: string; kind?: string } };
+  return {
+    status: res.status,
+    json: (await res.json()) as {
+      error?: string;
+      kind?: string;
+      result?: { verdict: string; message?: string };
+    },
+  };
 };
 
-describe('POST /system-code error classification', () => {
-  // The whole point of the 4xx work: an ordinary submission mistake must be
-  // distinguishable from the trace service being broken.
-  it('reports a C++ submission with no entry point as 422, not 500', async () => {
+describe('POST /trace error classification', () => {
+  // An ordinary submission mistake must be distinguishable from the trace
+  // service being broken: it is a 200 carrying an `error` verdict, while a
+  // non-2xx status is reserved for bad requests and real service faults.
+  const tc = { input: '1', expected: '1' };
+
+  it('reports a C++ submission with no entry point as an error verdict', async () => {
     const { status, json } = await post(
-      '/system-code',
-      JSON.stringify({ language: 'cpp', code: 'int x = 1;' }),
+      '/trace',
+      JSON.stringify({ language: 'cpp', code: 'int x = 1;', testCase: tc }),
     );
-    expect(status).toBe(422);
-    expect(json.kind).toBe('submission');
+    expect(status).toBe(200);
+    expect(json.result?.verdict).toBe('error');
+    expect(json.result?.message).toMatch(/No entry point found/);
   });
 
-  it('reports a Java submission with no Solution class as 422, not 500', async () => {
+  it('reports a Java submission with no Solution class as an error verdict', async () => {
     const { status, json } = await post(
-      '/system-code',
-      JSON.stringify({ language: 'java', code: 'class Nope { public int f() { return 1; } }' }),
+      '/trace',
+      JSON.stringify({
+        language: 'java',
+        code: 'class Nope { public int f() { return 1; } }',
+        testCase: tc,
+      }),
     );
-    expect(status).toBe(422);
-    expect(json.kind).toBe('submission');
-    expect(json.error).toMatch(/Solution/);
+    expect(status).toBe(200);
+    expect(json.result?.message).toMatch(/Solution/);
   });
 
-  it('reports an unsupported language as 422', async () => {
+  it('reports an unsupported language as an error verdict', async () => {
     const { status, json } = await post(
-      '/system-code',
-      JSON.stringify({ language: 'rust', code: 'fn main() {}' }),
+      '/trace',
+      JSON.stringify({ language: 'rust', code: 'fn main() {}', testCase: tc }),
     );
-    expect(status).toBe(422);
-    expect(json.kind).toBe('submission');
+    expect(status).toBe(200);
+    expect(json.result?.message).toMatch(/unsupported language/);
+  });
+
+  it('no longer serves /system-code — call sites are built client-side', async () => {
+    const { status } = await post('/system-code', JSON.stringify({ language: 'cpp', code: '' }));
+    expect(status).toBe(404);
   });
 
   it('reports malformed JSON as 400, not 500', async () => {
-    const { status, json } = await post('/system-code', '{not json');
+    const { status, json } = await post('/trace', '{not json');
     expect(status).toBe(400);
     expect(json.kind).toBe('request');
   });
 
   it('reports a schema-invalid body as 400', async () => {
-    const { status } = await post('/system-code', JSON.stringify({ language: 'cpp' }));
+    const { status } = await post('/trace', JSON.stringify({ language: 'cpp' }));
     expect(status).toBe(400);
   });
 
@@ -82,15 +99,5 @@ describe('POST /system-code error classification', () => {
     const { status, json } = await post('/trace', 'nope');
     expect(status).toBe(400);
     expect(json.kind).toBe('request');
-  });
-});
-
-describe('detector errors are normalized to user errors', () => {
-  // Regression: findCppEntry/findJavaEntry throw plain Error, so without
-  // normalizing at the generator boundary the HTTP layer's 422 branch never
-  // fired for the single most common failure.
-  it('wraps a plain detector Error as TraceUserError', () => {
-    expect(() => getDefaultSystemCode('cpp', 'int x = 1;')).toThrow(TraceUserError);
-    expect(() => getDefaultSystemCode('java', 'class Nope {}')).toThrow(TraceUserError);
   });
 });
