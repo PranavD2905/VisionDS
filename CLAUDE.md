@@ -52,7 +52,15 @@ pnpm workspaces monorepo:
   trace (real `call`/`return` events where a runner emits them, `callDepth`
   transitions where it only emits `line`) and reports which functions were
   observed calling themselves — mutual recursion included; every step now
-  carries an optional `func` name for it;
+  carries an optional `func` name for it; **frames** (additive fields): each
+  step's `frameId` (one per call activation), `caller` (the immediate
+  student caller's `func`/`frameId`/non-scalar locals) and each reference
+  value's `ref` (object identity — Python `id()`, lldb referent/pointee
+  address, JDI `uniqueID()`), all emitted by all three tracers; `frames.ts`
+  has `varKey(func, name)` (variables are per *function*, never by bare
+  name), `previousInFrame` (diff a step against its own frame's previous
+  step) and `aliasesOf` (caller values that are the same object as a local);
+  `inferPointerRoles` keys by `varKey`;
   `fixtures/twoSumFail.ts` canned trace for UI work without a runner;
   `testcase.ts` — the **one testcase parser** (JSON first, then Python
   literals: `True`/`None`, single quotes, tuples, trailing commas; one arg per
@@ -284,6 +292,14 @@ pnpm workspaces monorepo:
   working.
   Shared playback components live in `src/components/`: Stage +
   `stage/views.tsx` (animated arrays/dicts/scalars, pointer chips), Transport.
+  **The stage is per frame**: `prev` is `previousInFrame` (entering a helper
+  is not "every variable changed"), `inferShapes` diffs within a frame and
+  keys shapes by `varKey`, and during a helper call the caller's structures
+  sit beneath the live frame in a dimmed `.stage-caller` strip — rendered
+  through the same views but forced 2D (`Flat2D` context, so a helper call
+  never spins up extra WebGL scenes) and in its own `LayoutGroup id` so
+  same-named cells never glide between frames. An alias is drawn once, live
+  in the helper, with a `nums ↗ arr` chip in the strip.
   **Every structure kind has a 3D scene** (`stage/three/`, react-three-fiber),
   one metaphor per kind: array/string = block rail (height encodes numeric
   value, uniform tiles otherwise; swap arcs on two lanes so passing blocks
@@ -464,6 +480,24 @@ The web app finds the service at `VITE_TRACE_SERVICE` (default
   recursion). Typecheck, prod build and all 60 tests pass. **Not yet exercised
   in a real browser** — the Chrome extension was not connected this session,
   so the reveal choreography and auto-pan are visually unverified.
+- Done & verified (2026-10-02): **multiple entry points, reworked** (branch
+  `feat/multiple-entry-points`, CONTEXT.md + `docs/adr/0001`). One
+  `@visionds/entry-policy` (Lezer, all three languages) replaced four or five
+  disagreeing detectors; the call site decides the entry everywhere; one
+  testcase parser; every submission problem is an `error` verdict;
+  `/system-code` and the request-level `entry` are gone; the workbench source
+  is a pure reducer with a derived call site (picks persist, no "Preparing…");
+  the stage is frame-aware with a caller strip and aliases. Fixed en route: a
+  helper written after the entry became the default (all languages); nested
+  Python closures became candidates; the C++ bare-name breakpoint hit libc++
+  symbols and recorded zero steps (`add(int,int)` now traces); Java traced
+  the wrong overload and emitted line-1 garbage steps; the synthetic C++/Java
+  return step opened a bogus call-tree root after a helper. 239 unit tests,
+  typecheck and prod build pass; verified in a headless browser on live runs
+  (Python two-problem file + helper, picker persistence across reload, a
+  broken call site's inline problem, a C++ run through the service, and the
+  caller strip with a `nums ↗ arr` alias). Scrub animation smoothness was not
+  judged (headless).
 - Not built yet: production sandbox for the trace service, Claude explainer
   option, graph/adjacency visualization. Known minor: bundling supabase-js grew
   the web main chunk (~940 kB → ~1.3 MB) — lazy-load the auth client to trim it.

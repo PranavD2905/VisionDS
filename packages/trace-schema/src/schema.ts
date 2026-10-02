@@ -44,6 +44,13 @@ export const VarSnapshotSchema = z.object({
   value: JsonValueSchema,
   truncated: z.boolean().optional(),
   role: VarRoleSchema.optional(),
+  /**
+   * Opaque object identity for a reference value (a list, map, node, …):
+   * two snapshots with the same `ref` in one step are the same object seen
+   * from two frames — an alias, drawn once. Absent for plain values and from
+   * runners that don't report identity.
+   */
+  ref: z.string().optional(),
 });
 export type VarSnapshot = z.infer<typeof VarSnapshotSchema>;
 
@@ -61,6 +68,24 @@ export const TraceStepSchema = z.object({
    * builder falls back to positional frame labels when it is absent.
    */
   func: z.string().optional(),
+  /**
+   * Identity of the frame activation (one call) this step belongs to, unique
+   * within the trace. A variable's history belongs to a frame: the same name
+   * in two frames is two variables. Absent from older traces.
+   */
+  frameId: z.number().int().nonnegative().optional(),
+  /**
+   * The immediate caller's structures (non-scalar locals) while this step is
+   * inside a helper call, so the stage can keep what the student was working
+   * on in view. Absent at the entry frame and from older traces.
+   */
+  caller: z
+    .object({
+      func: z.string(),
+      frameId: z.number().int().nonnegative().optional(),
+      locals: z.array(VarSnapshotSchema),
+    })
+    .optional(),
   /** stdout produced up to and including this step. */
   stdout: z.string(),
   callDepth: z.number().int().nonnegative(),

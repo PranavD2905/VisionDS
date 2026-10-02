@@ -187,15 +187,23 @@ _SKIP_TYPES = (
 )
 
 
-def _snapshot_locals(f_locals):
+def _snapshot_locals(f_locals, structures_only=False):
+    """Capped, kind-tagged snapshots. Reference values (containers, nodes)
+    carry `ref`, their object identity, so the stage can tell the caller's
+    `nums` and a helper's `arr` are one list rather than drawing a copy."""
     out = []
     for name, v in f_locals.items():
         if name.startswith("_") or name == "self":
             continue
         if isinstance(v, _SKIP_TYPES):
             continue
+        kind = _kind_of(v)
+        if structures_only and kind == "scalar":
+            continue
         state = {"truncated": False}
-        snap = {"name": name, "kind": _kind_of(v), "value": _convert(v, 0, state)}
+        snap = {"name": name, "kind": kind, "value": _convert(v, 0, state)}
+        if kind not in ("scalar", "string"):
+            snap["ref"] = "py%x" % id(v)
         if state["truncated"]:
             snap["truncated"] = True
         out.append(snap)
@@ -213,6 +221,16 @@ class _Tracer:
         self.limit = None
         self._last_stdout = ""
         self._stdout_capped = False
+        # frame object -> activation id, for frames still on the stack
+        self._frame_ids = {}
+        self._next_frame_id = 0
+
+    def _frame_id(self, frame):
+        fid = self._frame_ids.get(frame)
+        if fid is None:
+            fid = self._frame_ids[frame] = self._next_frame_id
+            self._next_frame_id += 1
+        return fid
 
     def _stdout(self):
         if self._stdout_capped:
@@ -238,13 +256,22 @@ class _Tracer:
             "event": event,
             "locals": _snapshot_locals(frame.f_locals),
             "func": frame.f_code.co_name,
+            "frameId": self._frame_id(frame),
             "stdout": self._stdout(),
             "callDepth": self.depth,
         }
+        caller = frame.f_back
+        if caller is not None and caller.f_code.co_filename == STUDENT_FILE:
+            step["caller"] = {
+                "func": caller.f_code.co_name,
+                "frameId": self._frame_id(caller),
+                "locals": _snapshot_locals(caller.f_locals, structures_only=True),
+            }
         if event == "return":
             state = {"truncated": False}
             step["returnValue"] = _convert(arg, 0, state)
             self.depth -= 1
+            self._frame_ids.pop(frame, None)
         elif event == "exception":
             exc_type, exc_value, _tb = arg
             step["exception"] = {

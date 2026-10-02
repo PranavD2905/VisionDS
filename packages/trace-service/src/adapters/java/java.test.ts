@@ -78,6 +78,13 @@ describe('Java tracing via JDI', () => {
     expect(trace.entry).toEqual({ name: 'sumOfSquares', className: 'Solution' });
     expect(trace.result.verdict).toBe('pass');
     expect(new Set(trace.steps.map((s) => s.func))).toEqual(new Set(['sumOfSquares', 'square']));
+
+    // each call of the helper is its own frame, with the entry as caller
+    const helperFrames = new Set(trace.steps.filter((s) => s.func === 'square').map((s) => s.frameId));
+    expect(helperFrames.size).toBe(3);
+    const inHelper = trace.steps.find((s) => s.func === 'square')!;
+    expect(inHelper.caller?.func).toBe('sumOfSquares');
+    expect(inHelper.caller?.locals.find((v) => v.name === 'nums')?.ref).toMatch(/^j\d+$/);
   }, 30_000);
 
   it('traces the overload the testcase argument count selects', () => {

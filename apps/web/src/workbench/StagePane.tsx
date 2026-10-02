@@ -1,4 +1,4 @@
-import { buildCallTree, type ExecutionTrace } from '@visionds/trace-schema';
+import { buildCallTree, previousInFrame, type ExecutionTrace } from '@visionds/trace-schema';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { CallTreeView } from '../components/CallTreeView';
 import { ExplainPanel } from '../components/ExplainPanel';
@@ -72,7 +72,8 @@ export function StagePane({
   }
 
   const step = trace.steps[cursor];
-  const prev = cursor > 0 ? trace.steps[cursor - 1] : undefined;
+  // this frame's own previous step — never the caller's or a helper's
+  const prev = previousInFrame(trace.steps, cursor);
 
   return (
     <section className="pane pane-stage frame" aria-label="Visualization">

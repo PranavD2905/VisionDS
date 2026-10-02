@@ -210,6 +210,34 @@ private:
     expect(tree.nodes[tree.roots[0]!]!.func).toBe('maxDepth');
   }, 30_000);
 
+  it('records frames, the caller strip, and aliases through a reference parameter', () => {
+    const code = `class Solution {
+public:
+    int total(vector<int>& nums) {
+        bump(nums);
+        int s = 0;
+        for (int x : nums) s += x;
+        return s;
+    }
+    void bump(vector<int>& arr) {
+        for (int i = 0; i < (int)arr.size(); i++) arr[i] += 1;
+    }
+};`;
+    const trace = traceCase('cpp', code, { input: '[1,2,3]', expected: '9' });
+    expect(trace.result.verdict).toBe('pass');
+    const inHelper = trace.steps.find((s) => s.func === 'bump')!;
+    expect(inHelper.frameId).not.toBe(trace.steps[0]!.frameId);
+    expect(inHelper.caller?.func).toBe('total');
+    const arr = inHelper.locals.find((v) => v.name === 'arr')!;
+    const nums = inHelper.caller!.locals.find((v) => v.name === 'nums')!;
+    expect(arr.ref).toBeDefined();
+    expect(arr.ref).toBe(nums.ref);
+    // back in the entry: its own frame again, and no caller
+    const after = trace.steps.filter((s) => s.func === 'total').at(-1)!;
+    expect(after.frameId).toBe(trace.steps[0]!.frameId);
+    expect(after.caller).toBeUndefined();
+  }, 30_000);
+
   it('runs whichever candidate an edited call site calls', () => {
     const code = `int square(int x) { return x * x; }
 class Solution {

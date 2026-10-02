@@ -1,6 +1,15 @@
 import type { JsonValue, VarKind, VarSnapshot } from '@visionds/trace-schema';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Component, Suspense, lazy, useRef, type FC, type ReactNode } from 'react';
+import {
+  Component,
+  Suspense,
+  createContext,
+  lazy,
+  useContext,
+  useRef,
+  type FC,
+  type ReactNode,
+} from 'react';
 import { fmt } from '../../lib/format';
 import { tokenAlpha } from '../../theme/tokens';
 import { useSlotIds } from './slotIds';
@@ -344,9 +353,20 @@ const toChips = (pointers: VarSnapshot[]) =>
 const clampW = (w: number) => Math.min(680, Math.max(300, w));
 
 /** Shared 3D eligibility: never against the viewer's wishes or their GPU. */
+/**
+ * Views inside force their 2D form. The caller strip uses it: a dimmed,
+ * secondary copy of what the student was looking at should never spin up
+ * another WebGL scene on every helper call.
+ */
+const Flat2DContext = createContext(false);
+export function Flat2D({ children }: { children: ReactNode }) {
+  return <Flat2DContext.Provider value={true}>{children}</Flat2DContext.Provider>;
+}
+
 function use3dBase(): boolean {
+  const flat = useContext(Flat2DContext);
   const reduced = useReducedMotion();
-  return !reduced && hasWebGL();
+  return !flat && !reduced && hasWebGL();
 }
 
 /**

@@ -626,6 +626,50 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   max-width: 100%;
 }
 
+/* the immediate caller's structures during a helper call: kept in view,
+   dimmed and flat, so the frame the student was watching never vanishes */
+.stage-caller {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding-top: var(--s-4);
+  border-top: 1px dashed var(--border);
+  opacity: 0.55;
+  transition: opacity 180ms ease;
+}
+.stage-caller:hover { opacity: 0.85; }
+.stage-caller-tag {
+  font-family: var(--font-stamp);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.stage-caller-items {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--s-4);
+  max-width: 100%;
+}
+.alias-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 4px);
+  color: var(--muted);
+  font-size: 12px;
+}
+.alias-chip code { color: var(--text); }
+@media (prefers-reduced-motion: reduce) {
+  .stage-caller { transition: none; }
+}
+
 /* the drawn diagram frame */
 .struct {
   position: relative;

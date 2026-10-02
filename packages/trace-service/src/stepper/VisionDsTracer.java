@@ -118,38 +118,83 @@ public class VisionDsTracer {
 
     // --------------------------------------------------------- snapshot
 
+    // Frame activations, outermost first. A frame keeps its id while it and
+    // every frame beneath it are unchanged between steps; a method re-entered
+    // after a return gets a new id because the caller's own step lands between.
+    static List<String> activeMethods = new ArrayList<>();
+    static List<Integer> activeIds = new ArrayList<>();
+    static int nextFrameId = 0;
+
+    static int[] frameIds(ThreadReference t, int baseFrames) throws IncompatibleThreadStateException {
+        int depth = Math.max(0, t.frameCount() - baseFrames);
+        List<String> methods = new ArrayList<>();
+        for (int i = depth; i >= 0; i--) {
+            Method m = t.frame(i).location().method();
+            methods.add(m.name() + m.signature());
+        }
+        int[] ids = new int[methods.size()];
+        List<Integer> kept = new ArrayList<>();
+        boolean same = true;
+        for (int d = 0; d < methods.size(); d++) {
+            same = same && d < activeMethods.size() && activeMethods.get(d).equals(methods.get(d));
+            ids[d] = same ? activeIds.get(d) : nextFrameId++;
+            kept.add(ids[d]);
+        }
+        activeMethods = methods;
+        activeIds = kept;
+        return ids;
+    }
+
     static String snapshot(ThreadReference t, String entryClass, int studentStart, int baseFrames) {
         StringBuilder sb = new StringBuilder("{");
         try {
             StackFrame f = t.frame(0);
             int line = f.location().lineNumber() - studentStart + 1;
             int depth = Math.max(0, t.frameCount() - baseFrames);
+            int[] ids = frameIds(t, baseFrames);
             sb.append("\"index\":0,\"line\":").append(line).append(",\"event\":\"line\",\"callDepth\":").append(depth);
             sb.append(",\"func\":").append(jsonStr(f.location().method().name()));
-            sb.append(",\"stdout\":\"\",\"locals\":[");
-            boolean first = true;
-            Set<String> seen = new HashSet<>();
-            List<LocalVariable> vars;
-            try { vars = f.visibleVariables(); } catch (AbsentInformationException e) { vars = Collections.emptyList(); }
-            for (LocalVariable v : vars) {
-                String name = v.name();
-                if (name.startsWith("$") || !seen.add(name)) continue;
-                Value val = f.getValue(v);
-                boolean[] trunc = {false};
-                String kind = kindOf(val);
-                String json = convert(val, 0, trunc);
-                if (!first) sb.append(",");
-                first = false;
-                sb.append("{\"name\":").append(jsonStr(name)).append(",\"kind\":").append(jsonStr(kind))
-                  .append(",\"value\":").append(json);
-                if (trunc[0]) sb.append(",\"truncated\":true");
-                sb.append("}");
+            sb.append(",\"frameId\":").append(ids[ids.length - 1]);
+            sb.append(",\"stdout\":\"\",\"locals\":").append(locals(f, false));
+            if (depth >= 1 && ids.length >= 2) {
+                StackFrame c = t.frame(1);
+                if (isStudent(c.location().declaringType().name(), entryClass)) {
+                    sb.append(",\"caller\":{\"func\":").append(jsonStr(c.location().method().name()))
+                      .append(",\"frameId\":").append(ids[ids.length - 2])
+                      .append(",\"locals\":").append(locals(c, true)).append("}");
+                }
             }
-            sb.append("]");
         } catch (Exception e) {
             return null;
         }
         return sb.append("}").toString();
+    }
+
+    /** A frame's locals as a JSON array; reference values carry their object identity as `ref`. */
+    static String locals(StackFrame f, boolean structuresOnly) throws Exception {
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        Set<String> seen = new HashSet<>();
+        List<LocalVariable> vars;
+        try { vars = f.visibleVariables(); } catch (AbsentInformationException e) { vars = Collections.emptyList(); }
+        for (LocalVariable v : vars) {
+            String name = v.name();
+            if (name.startsWith("$") || !seen.add(name)) continue;
+            Value val = f.getValue(v);
+            String kind = kindOf(val);
+            if (structuresOnly && kind.equals("scalar")) continue;
+            boolean[] trunc = {false};
+            String json = convert(val, 0, trunc);
+            if (!first) sb.append(",");
+            first = false;
+            sb.append("{\"name\":").append(jsonStr(name)).append(",\"kind\":").append(jsonStr(kind))
+              .append(",\"value\":").append(json);
+            if (val instanceof ObjectReference o && !kind.equals("scalar") && !kind.equals("string"))
+                sb.append(",\"ref\":\"j").append(o.uniqueID()).append("\"");
+            if (trunc[0]) sb.append(",\"truncated\":true");
+            sb.append("}");
+        }
+        return sb.append("]").toString();
     }
 
     // --------------------------------------------------------- kinds

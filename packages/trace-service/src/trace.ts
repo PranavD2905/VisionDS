@@ -140,12 +140,21 @@ function assembleTrace(
   // and open a bogus second root.
   if (hasResult && out.exited && steps.length > 0) {
     const last = steps[steps.length - 1]!;
+    // The entry's own last moment — its line and locals, not a helper's.
+    let entryLast = last;
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (steps[i]!.callDepth === 0) {
+        entryLast = steps[i]!;
+        break;
+      }
+    }
     steps.push({
       index: steps.length,
-      line: last.line,
+      line: entryLast.line,
       event: 'return',
-      locals: last.locals,
+      locals: entryLast.locals,
       func: entry.name,
+      ...(entryLast.frameId !== undefined ? { frameId: entryLast.frameId } : {}),
       stdout: last.stdout,
       callDepth: 0,
       returnValue: actual ?? null,

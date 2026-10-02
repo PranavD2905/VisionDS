@@ -283,7 +283,37 @@ def twoSum(nums, target):
     expect(trace.result.verdict).toBe('pass');
     const funcs = new Set(trace.steps.map((s) => s.func));
     expect(funcs).toEqual(new Set(['twoSum', 'find']));
-    expect(trace.steps.find((s) => s.func === 'find')!.callDepth).toBe(1);
+    const inHelper = trace.steps.find((s) => s.func === 'find' && s.event === 'line')!;
+    expect(inHelper.callDepth).toBe(1);
+
+    // the helper is its own frame, and it knows who called it
+    const entryFrame = trace.steps[0]!.frameId;
+    expect(inHelper.frameId).not.toBe(entryFrame);
+    expect(inHelper.caller?.func).toBe('twoSum');
+    expect(inHelper.caller?.frameId).toBe(entryFrame);
+
+    // `nums` in the helper is the caller's list, not a copy: same identity
+    const mine = inHelper.locals.find((v) => v.name === 'nums')!;
+    const theirs = inHelper.caller!.locals.find((v) => v.name === 'nums')!;
+    expect(mine.ref).toBeDefined();
+    expect(mine.ref).toBe(theirs.ref);
+    // the caller strip carries structures only, never scalars like `target`
+    expect(inHelper.caller!.locals.some((v) => v.kind === 'scalar')).toBe(false);
+  });
+
+  it('gives each recursive activation its own frame id', () => {
+    const trace = runCase(
+      `def fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+`,
+      { input: '3', expected: '2' },
+    );
+    const calls = trace.steps.filter((s) => s.event === 'call');
+    expect(new Set(calls.map((s) => s.frameId)).size).toBe(calls.length);
+    expect(calls[0]!.caller).toBeUndefined();
+    expect(calls[1]!.caller?.func).toBe('fib');
   });
 
   it('reports a call site that calls no candidate as a user error, before running', () => {

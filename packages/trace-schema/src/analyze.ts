@@ -1,3 +1,4 @@
+import { varKey } from './frames';
 import type { ExecutionTrace, TraceStep, VarSnapshot } from './schema';
 
 const POINTER_NAMES = new Set([
@@ -17,41 +18,48 @@ interface Candidate {
  * exist is tagged with role {kind:'index', target}, so the UI can render it
  * as a pointer chip riding on that array. Returns a new trace; the input is
  * not mutated.
+ *
+ * Variables are identified per function (`varKey`), never by name alone: an
+ * `i` in the entry and an `i` in a helper are inferred separately, so one
+ * can't steal the other's target or fail the other's bounds check.
  */
 export function inferPointerRoles(trace: ExecutionTrace): ExecutionTrace {
-  const intNames = new Set<string>();
+  const intKeys = new Map<string, string>(); // key → bare name
+  const notInt = new Set<string>();
   const intValues = new Map<string, Set<number>>();
-  const arrayNames = new Set<string>();
+  const arrayKeys = new Set<string>();
 
   for (const step of trace.steps) {
     for (const v of step.locals) {
+      const key = varKey(step.func, v.name);
       if (v.kind === 'array' || v.kind === 'matrix' || v.kind === 'string') {
-        arrayNames.add(v.name);
+        arrayKeys.add(key);
       }
       if (v.kind === 'scalar' && typeof v.value === 'number' && Number.isInteger(v.value)) {
-        intNames.add(v.name);
-        let set = intValues.get(v.name);
-        if (!set) intValues.set(v.name, (set = new Set()));
+        intKeys.set(key, v.name);
+        let set = intValues.get(key);
+        if (!set) intValues.set(key, (set = new Set()));
         set.add(v.value);
-      } else if (intNames.has(v.name)) {
+      } else {
         // took a non-integer value at some step — not an index
-        intNames.delete(v.name);
+        notInt.add(key);
       }
     }
   }
 
   const roles = new Map<string, string>();
-  for (const name of intNames) {
-    if (arrayNames.has(name)) continue;
-    const varies = (intValues.get(name)?.size ?? 0) >= 2;
+  for (const [key, name] of intKeys) {
+    if (notInt.has(key) || arrayKeys.has(key)) continue;
+    const varies = (intValues.get(key)?.size ?? 0) >= 2;
     if (!varies && !POINTER_NAMES.has(name)) continue;
 
     const candidates = new Map<string, Candidate>();
     for (const step of trace.steps) {
+      if (varKey(step.func, name) !== key) continue;
       const me = step.locals.find((v) => v.name === name);
       if (!me || typeof me.value !== 'number') continue;
       for (const arr of step.locals) {
-        if (!arrayNames.has(arr.name)) continue;
+        if (!arrayKeys.has(varKey(step.func, arr.name))) continue;
         const len = Array.isArray(arr.value)
           ? arr.value.length
           : typeof arr.value === 'string'
@@ -74,7 +82,7 @@ export function inferPointerRoles(trace: ExecutionTrace): ExecutionTrace {
         bestCount = c.cooccurrences;
       }
     }
-    if (best) roles.set(name, best);
+    if (best) roles.set(key, best);
   }
 
   if (roles.size === 0) return trace;
@@ -82,7 +90,7 @@ export function inferPointerRoles(trace: ExecutionTrace): ExecutionTrace {
   const steps: TraceStep[] = trace.steps.map((step) => ({
     ...step,
     locals: step.locals.map((v): VarSnapshot => {
-      const target = roles.get(v.name);
+      const target = roles.get(varKey(step.func, v.name));
       return target ? { ...v, role: { kind: 'index', target } } : v;
     }),
   }));
