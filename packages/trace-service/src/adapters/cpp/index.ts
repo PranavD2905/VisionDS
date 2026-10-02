@@ -80,7 +80,16 @@ export const cppAdapter: LanguageAdapter = {
       { memMb: MEM_MB },
     );
     return {
-      stepper: { command, args: stepperArgs, env: { PYTHONPATH: getLldbPythonPath() }, cwd: dir },
+      stepper: {
+        command,
+        args: stepperArgs,
+        env: {
+          PYTHONPATH: getLldbPythonPath(),
+          // The child env is scrubbed, so the image's debug-server path must be passed on.
+          ...(process.env.LLDB_DEBUGSERVER_PATH ? { LLDB_DEBUGSERVER_PATH: process.env.LLDB_DEBUGSERVER_PATH } : {}),
+        },
+        cwd: dir,
+      },
       cleanup: () => rmSync(dir, { recursive: true, force: true }),
     };
   },

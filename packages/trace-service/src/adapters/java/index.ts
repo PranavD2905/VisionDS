@@ -50,7 +50,7 @@ export function ensureTracerCompiled(): string {
   const dir = join(process.env.VISIONDS_CACHE_DIR || tmpdir(), `visionds-java-tracer-${hash}`);
   if (existsSync(join(dir, 'VisionDsTracer.class'))) return (tracerClasses = dir);
   mkdirSync(dir, { recursive: true });
-  const res = spawnSync(bin('javac'), ['-d', dir, TRACER_SRC], { encoding: 'utf8', timeout: 60_000 });
+  const res = spawnSync(bin('javac'), ['-encoding', 'UTF-8', '-d', dir, TRACER_SRC], { encoding: 'utf8', timeout: 60_000 });
   if (res.status !== 0) throw new Error(`failed to compile JDI tracer: ${res.stderr ?? ''}`);
   return (tracerClasses = dir);
 }
@@ -73,7 +73,7 @@ export const javaAdapter: LanguageAdapter = {
     writeFileSync(solPath, prog.solution, 'utf8');
     writeFileSync(mainPath, prog.main, 'utf8');
 
-    const compile = await run(...sandboxed(bin('javac'), ['-J-Xmx256m', '-g', '-d', dir, solPath, mainPath]), {
+    const compile = await run(...sandboxed(bin('javac'), ['-J-Xmx256m', '-encoding', 'UTF-8', '-g', '-d', dir, solPath, mainPath]), {
       timeoutMs: 60_000,
       env: childEnv({}, dir),
       cwd: dir,

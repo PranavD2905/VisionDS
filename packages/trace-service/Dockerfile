@@ -26,7 +26,10 @@ RUN apt-get update \
 # The real lldb package (with __init__.py) is under the versioned site-packages;
 # python3/dist-packages only holds .so shims and imports as an empty namespace.
 # python3.11 = bookworm's python3 — change it with the base image.
+# LLDB_DEBUGSERVER_PATH: Debian names it lldb-server; lldb looks for
+# lldb-server-<full version> and fails to launch without this.
 ENV VISIONDS_LLDB_PYTHONPATH=/usr/lib/llvm-${LLVM_VERSION}/lib/python3.11/site-packages \
+    LLDB_DEBUGSERVER_PATH=/usr/lib/llvm-${LLVM_VERSION}/bin/lldb-server \
     VISIONDS_PYTHON=/usr/bin/python3 \
     VISIONDS_JAVA_HOME=/usr/lib/jvm/java-${JDK_VERSION}-openjdk-amd64 \
     VISIONDS_CACHE_DIR=/var/cache/visionds \
