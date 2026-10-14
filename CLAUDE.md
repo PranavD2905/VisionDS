@@ -409,8 +409,10 @@ Trace-service hardening (all env-driven, dev defaults unchanged):
   it): compile *and* step run as `unshare --pid … -- prlimit … -- setpriv
   --reuid=sandbox …` (a PID namespace per run, so nothing outlives it),
   env scrubbed (`childEnv`, never `process.env`). The entrypoint installs an
-  iptables owner-match REJECT for that uid (loopback allowed for JDI, the
-  service port blocked) and **fails closed** if it can't. The server stays
+  nft `meta skuid` REJECT for that uid (loopback allowed for JDI, the service
+  port blocked) and **fails closed** if it can't. Fly's kernel has no
+  `xt_owner`, so `iptables -m owner` fails there; iptables stays only as a
+  fallback. The server stays
   root inside the VM because setpriv needs it. The JVM gets `-Xmx`, not
   RLIMIT_AS. `sandbox.test.ts` only runs in the image (CI).
 - The Debian lldb `-P` path is wrong; the image passes

@@ -2,7 +2,7 @@
 #
 # Build from the REPO ROOT (the service imports workspace packages):
 #   docker build -f packages/trace-service/Dockerfile -t visionds-trace .
-# Run locally (iptables needs NET_ADMIN, lldb needs ptrace, the per-run PID
+# Run locally (the egress rule needs NET_ADMIN, lldb needs ptrace, the per-run PID
 # namespace needs SYS_ADMIN + mount, which AppArmor's docker profile denies):
 #   docker run --rm -p 8787:8080 --cap-add NET_ADMIN --cap-add SYS_PTRACE \
 #     --cap-add SYS_ADMIN --security-opt seccomp=unconfined \
@@ -20,7 +20,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       clang-${LLVM_VERSION} lldb-${LLVM_VERSION} python3-lldb-${LLVM_VERSION} python3 \
       openjdk-${JDK_VERSION}-jdk-headless \
-      iptables util-linux ca-certificates \
+      nftables iptables util-linux ca-certificates \
  && ln -sf /usr/bin/clang++-${LLVM_VERSION} /usr/local/bin/clang++ \
  && ln -sf /usr/bin/lldb-${LLVM_VERSION} /usr/local/bin/lldb \
  && rm -rf /var/lib/apt/lists/*

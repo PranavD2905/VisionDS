@@ -17,8 +17,28 @@ if [ -n "${VISIONDS_SANDBOX_USER:-}" ]; then
     "$t" -A OUTPUT -m owner --uid-owner "$uid" -j REJECT
   }
 
-  # nft-backed iptables first, legacy as a fallback for kernels without nf_tables.
-  if apply iptables 2>/dev/null; then
+  # nftables first: Fly's kernel has no xt_owner module, so iptables -m owner
+  # fails there, but nft's native `meta skuid` match works. One inet table
+  # covers IPv4 and IPv6.
+  apply_nft() {
+    nft delete table inet visionds_sandbox 2>/dev/null || true
+    nft -f - <<RULES
+table inet visionds_sandbox {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    oif lo meta skuid $uid tcp dport $port reject
+    oif lo meta skuid $uid accept
+    meta skuid $uid reject
+  }
+}
+RULES
+  }
+
+  # Fallback: nft-backed iptables, then legacy iptables, for kernels with
+  # xt_owner but no usable nft.
+  if apply_nft 2>/dev/null; then
+    :
+  elif apply iptables 2>/dev/null; then
     apply ip6tables 2>/dev/null || echo "[visionds] warning: ip6tables unavailable; IPv4 egress blocked" >&2
   elif apply iptables-legacy; then
     apply ip6tables-legacy 2>/dev/null || echo "[visionds] warning: ip6tables-legacy unavailable; IPv4 egress blocked" >&2
