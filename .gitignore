@@ -10,3 +10,6 @@ coverage/
 
 # local design-tool workspace (session state, not source)
 .impeccable/
+
+# IDE settings
+.idea/
