@@ -11,7 +11,7 @@ kill_timeout = "30s"
   PORT = "8080"
   # Exact origins, or `*` within one. Never `https://*.vercel.app` — anyone can
   # deploy there; scope previews to your project's own prefix.
-  ALLOWED_ORIGINS = "https://visionds.app,https://www.visionds.app,https://visionds-*-YOUR-VERCEL-TEAM.vercel.app"
+  ALLOWED_ORIGINS = "https://visionds.app,https://www.visionds.app,https://visionds-*-pranav2905.vercel.app"
   MAX_CONCURRENT_TRACES = "2"
   MAX_QUEUED_TRACES = "6"
   RATE_LIMIT_PER_MINUTE = "30"
